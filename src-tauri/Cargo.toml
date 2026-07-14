@@ -21,11 +21,14 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.47", features = ["full"] }
 # 协议实现库：Phase 0 为骨架（adapter 为 stub，不引用这些库），
-# 故设为 optional；Phase 1 实现 adapter 时启用 `protocol-adapters` feature。
-# 注：reqwest(rustls→aws-lc-sys)/russh 在 Windows 需 cmake + nasm 才能编译 C 部分。
+# 故设为 optional；Phase 1 实现 adapter 时启用对应 feature。
+# 注：reqwest(rustls→aws-lc-sys) 在 Windows 需 cmake + nasm 才能编译 C 部分。
 russh = { version = "0.54", optional = true }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"], optional = true }
+russh-sftp = { version = "2", optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"], optional = true }
 quick-xml = { version = "0.38", features = ["serialize"], optional = true }
+futures-util = { version = "0.3", optional = true }
+chrono = "0.4"
 aes-gcm = "0.10"
 argon2 = "0.5"
 keyring = "3"
@@ -43,8 +46,12 @@ ts-rs = { version = "11", features = ["uuid-impl", "serde-json-impl"] }
 [features]
 # 默认特性集（骨架：不含协议实现库，便于在无 nasm 环境下编译验证）
 default = []
-# 启用 SFTP/WebDAV adapter 实现依赖（Phase 1 起启用）
-protocol-adapters = ["dep:russh", "dep:reqwest", "dep:quick-xml"]
+# 启用 SFTP adapter（russh 纯 Rust，无需 nasm）
+sftp-adapter = ["dep:russh", "dep:russh-sftp"]
+# 启用 WebDAV adapter（reqwest+rustls 需 nasm）
+webdav-adapter = ["dep:reqwest", "dep:quick-xml", "dep:futures-util"]
+# 启用全部协议 adapter
+protocol-adapters = ["sftp-adapter", "webdav-adapter"]
 
 # Tauri 自定义命令测试入口
 [[test]]
