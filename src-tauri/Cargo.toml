@@ -1,0 +1,59 @@
+[package]
+name = "sy-tfm"
+version = "0.1.0"
+description = "SY-TFM — Tiny File Manager"
+authors = ["SY"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "sy_tfm"
+# 桌面端仅需 rlib；移动端（Android/iOS）构建时需追加 "staticlib", "cdylib"。
+# 当前环境无 MSVC，GNU ld 链接 cdylib 时 export ordinal 溢出，故桌面开发期仅保留 rlib。
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.47", features = ["full"] }
+# 协议实现库：Phase 0 为骨架（adapter 为 stub，不引用这些库），
+# 故设为 optional；Phase 1 实现 adapter 时启用 `protocol-adapters` feature。
+# 注：reqwest(rustls→aws-lc-sys)/russh 在 Windows 需 cmake + nasm 才能编译 C 部分。
+russh = { version = "0.54", optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"], optional = true }
+quick-xml = { version = "0.38", features = ["serialize"], optional = true }
+aes-gcm = "0.10"
+argon2 = "0.5"
+keyring = "3"
+uuid = { version = "1", features = ["v4", "serde"] }
+directories = "6"
+parking_lot = "0.12"
+notify = "8"
+tracing = "0.1"
+anyhow = "1"
+thiserror = "2"
+async-trait = "0.1"
+base64 = "0.22"
+ts-rs = { version = "11", features = ["uuid-impl", "serde-json-impl"] }
+
+[features]
+# 默认特性集（骨架：不含协议实现库，便于在无 nasm 环境下编译验证）
+default = []
+# 启用 SFTP/WebDAV adapter 实现依赖（Phase 1 起启用）
+protocol-adapters = ["dep:russh", "dep:reqwest", "dep:quick-xml"]
+
+# Tauri 自定义命令测试入口
+[[test]]
+name = "export_types"
+path = "tests/export_types.rs"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

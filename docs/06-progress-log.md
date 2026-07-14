@@ -2,8 +2,8 @@
 
 **项目名称:** SY-TFM (Tiny File Manager)  
 **创建日期:** 2026-07-10  
-**最后更新:** 2026-07-10  
-**当前阶段:** Phase 0 — 尚未启动（文档设计完成，待开发）
+**最后更新:** 2026-07-15  
+**当前阶段:** Phase 0 — 已完成骨架搭建（代码实现 ~60%，待 MSVC 环境验证运行时）
 
 > **使用说明:** 本文档是项目的活文档（living document），每次开发会话结束后更新。  
 > 顶部是快速概览，往下是详细记录。最新的内容在最上面。
@@ -16,29 +16,28 @@
 
 | 指标 | 值 |
 |------|-----|
-| 当前阶段 | Phase 0（项目骨架） |
-| 当前任务 | 无（文档设计完成，待启动开发） |
-| 总体进度 | 文档设计 100%，代码实现 0% |
-| 阻塞项 | 无 |
+| 当前阶段 | Phase 0（项目骨架）— 代码完成，待运行时验证 |
+| 当前任务 | Phase 0 收尾，准备进入 Phase 1 |
+| 总体进度 | 文档设计 100%，代码实现 ~60%（骨架完成，adapter 待实现） |
+| 阻塞项 | ⚠️ 本机无 MSVC link.exe，Rust 测试二进制运行时 DLL 链不完整（编译通过） |
 | 文档状态 | ✅ 需求 ✅ 架构 ✅ 接口 ✅ 数据模型 ✅ 实现计划 ✅ 进度日志 |
 
 ### 0.2 当前在做
 
-> 项目处于文档设计完成阶段，5 份设计文档 + 本进度日志均已产出，等待用户确认后启动 Phase 0 编码。
+> Phase 0 骨架代码已全部就位：Rust 后端（Cargo/tauri.conf/12 枚举/模型/FileTransport trait/adapter 骨架/crypto/storage/commands）+ 前端（Vite7/React19/Tailwind4/ESLint9/stores/components/i18n）。前端质量门禁通过；Rust 编译通过但测试运行时受 GNU 工具链 DLL 限制。
 
 ### 0.3 下一步计划
 
-1. **等待用户确认文档** — 评审 6 份文档，确认架构方案和技术选型
-2. **初始化 Git 仓库** — 创建 `sy-tfm` 新仓库（或在此仓库新分支）
-3. **启动 Phase 0 任务 0.1** — 初始化 Tauri 2 + React + Vite 项目
-4. **Phase 0 全链路** — 按实现计划 0.1 → 0.12 顺序执行
+1. **环境修复** — 安装 VS Build Tools（MSVC link.exe）以启用 Rust 测试运行时 + ts-rs 自动类型导出 + `tauri dev`
+2. **Phase 1 启动** — 启用 `protocol-adapters` feature，实现 SftpAdapter（russh）与 WebDavAdapter（reqwest）
+3. **类型文件自动化** — MSVC 环境就绪后运行 `cargo test --test export_types` 覆盖手工占位类型
 
 ### 0.4 阶段进度仪表盘
 
 | 阶段 | 状态 | 任务完成 | 里程碑 | 备注 |
 |------|------|---------|--------|------|
-| Phase 0 — 项目骨架 | ⬜ 未启动 | 0/12 | 0/7 | 待用户确认后启动 |
-| Phase 1 — 桌面端 MVP | ⬜ 未启动 | 0/30 | 0/8 | |
+| Phase 0 — 项目骨架 | 🟡 进行中 | 10/12 | 5/7 | 代码完成，待 MSVC 运行时验证 |
+| Phase 1 — 桌面端 MVP | 🟡 进行中 | 8/30 | 0/8 | 前端组件骨架已写，adapter 待实现 |
 | Phase 2 — 功能补全 | ⬜ 未启动 | 0/24 | 0/4 | |
 | Phase 3 — 移动端适配 | ⬜ 未启动 | 0/21 | 0/6 | |
 | Phase 4 — 优化打磨 | ⬜ 未启动 | 0/17 | 0/5 | |
@@ -187,6 +186,60 @@
 **下一步:**
 
 - 等待用户确认后启动 Phase 0 编码
+
+---
+
+### Session #005 — 2026-07-14/15
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-14 ~ 2026-07-15 |
+| **时长** | ~8h（自主推进） |
+| **类型** | Phase 0 骨架实现 + Phase 1 前端组件 |
+| **参与者** | AI 自主（用户休息） |
+
+**完成事项:**
+
+- 生成 `AGENTS.md` 约束文档（FileTransport 抽象 + 全局枚举目录 + 依赖版本基线 + 质量门禁）
+- 包管理器统一为 bun，同步到全部文档
+- 初始化 Git 仓库 + `.gitignore`（排除 AI 目录/旧源码/构建产物）
+- **Phase 0 全部骨架代码**：
+  - Rust 后端：Cargo.toml(基线版本)、tauri.conf.json(v2)、build.rs、capabilities、main.rs/lib.rs
+  - 12 个全局枚举 + error.rs(AppError)
+  - 数据模型：RemoteHost/RemoteFile/AppSettings/HostDto/ProgressPayload
+  - FileTransport trait + create_adapter 工厂 + SFTP/WebDAV adapter 骨架
+  - core/crypto/storage/commands 骨架 + SecretProtector(AES-256-GCM) + tests/export_types.rs
+  - .cargo/config.toml(GNU link-self-contained)
+- **前端骨架**：package.json(bun)、Vite7+Tailwind4+TS5.9+React19、ESLint9 flat config、Prettier
+  - lib/tauri.ts(全命令封装)、i18n.ts、utils.ts、locales en/zh
+  - Zustand stores(connectionStore/browserStore/settingsStore)
+  - Vitest + 占位测试
+- **Phase 1 前端组件**：HostList、HostEditDialog、FileList(虚拟列表)、Breadcrumb、DownloadBar、UploadZone、ContextMenu、Dialog、ToastProvider、fileIcons、App 路由整合
+- 手工生成 12 枚举 + 5 模型 TS 类型占位文件
+
+**产出物:**
+
+- `AGENTS.md`、`.gitignore`、`src-tauri/`（完整 Rust 骨架）、`src/`（完整前端骨架）
+- `src/types/enums/` + `src/types/generated/`（手工占位，待 ts-rs 覆盖）
+
+**决策记录:**
+
+- [ADR-011] 协议库(russh/reqwest/quick-xml)设为 optional feature，骨架期不编译 C 依赖
+- [ADR-012] crate-type 桌面开发期仅 rlib，移动端构建时追加 staticlib/cdylib
+- [ADR-013] GNU 工具链 + link-self-contained + MinGW dlltool 作为无 MSVC 环境的 workaround
+
+**环境问题（非代码问题）:**
+
+- 本机无 VS Build Tools（MSVC link.exe 缺失），改用 GNU 工具链
+- GNU ld 链接 cdylib 时 export ordinal 溢出 → crate-type 改为仅 rlib
+- Rust 测试二进制运行时 `STATUS_ENTRYPOINT_NOT_FOUND`（Tauri Windows DLL 链在 GNU 下不完整）→ 编译通过但测试无法运行
+- ts-rs 无法运行时执行 → 手工生成 TS 类型占位
+
+**下一步:**
+
+- 安装 VS Build Tools(MSVC) 修复运行时
+- `cargo test --test export_types` 覆盖手工类型
+- Phase 1：启用 protocol-adapters feature，实现 SftpAdapter/WebDavAdapter
 
 ---
 
@@ -529,35 +582,87 @@ Phase 0 任务 0.4 配置：
 
 ---
 
-## 3. Phase 任务追踪
+### ADR-011 — 协议库设为 optional feature
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-14 |
+| **状态** | 🟢 已接受 |
+| **决策者** | AI |
+
+**背景:** russh/reqwest(rustls→aws-lc-sys)/quick-xml 在 Windows 编译需 cmake+nasm，骨架期 adapter 为 stub 不引用这些库。
+
+**决策:** 将 russh/reqwest/quick-xml 设为 optional，通过 `protocol-adapters` feature 门控。Phase 1 实现 adapter 时启用。
+
+**理由:** 骨架期无需编译 C 依赖即可验证核心代码；Phase 1 启用 feature 后才拉入协议库。
+
+**影响:** Cargo.toml 有 `protocol-adapters` feature；adapter 文件用 `#[cfg(feature)]` 门控。
+
+---
+
+### ADR-012 — crate-type 桌面开发期仅 rlib
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-14 |
+| **状态** | 🟢 已接受 |
+| **决策者** | AI |
+
+**背景:** GNU ld 链接 cdylib 时 `export ordinal too large`（Tauri 依赖符号过多超出 GNU ld 限制）。
+
+**决策:** `[lib] crate-type = ["rlib"]`（桌面开发期）。移动端构建时追加 `["staticlib", "cdylib"]`。
+
+**理由:** 桌面端 `cargo test`/`tauri dev` 仅需 rlib；cdylib/staticlib 是 Android/iOS 专用。
+
+**影响:** 移动端构建需恢复完整 crate-type；当前仅影响 GNU 工具链，MSVC 无此问题。
+
+---
+
+### ADR-013 — GNU 工具链作为无 MSVC 的 workaround
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-14 |
+| **状态** | 🟡 已接受但有疑虑 |
+| **决策者** | AI |
+
+**背景:** 本机未安装 VS Build Tools（MSVC link.exe 缺失），默认 stable-x86_64-pc-windows-msvc 工具链无法链接。
+
+**决策:** 安装 stable-x86_64-pc-windows-gnu 工具链 + `.cargo/config.toml` 配置 `link-self-contained=yes`（用 rust-lld 绕过系统 MCF gcc）+ PATH 前置 MinGW bin（提供可用 dlltool）+ CARGO_TARGET_DIR 无空格路径（绕过 windres 空格 bug）。
+
+**理由:** 唯一能在无 MSVC 环境下编译 Tauri 2 项目的方案。
+
+**影响:** 编译可通过，但测试运行时 DLL 链不完整（`STATUS_ENTRYPOINT_NOT_FOUND`）；正式开发建议安装 MSVC。Tauri 官方推荐 MSVC 工具链。
+
+---
 
 ### 3.1 Phase 0 — 项目骨架（第 1 周）
 
 | # | 任务 | 状态 | 优先级 | 预估 | 实际 | 依赖 | 备注 |
 |---|------|------|--------|------|------|------|------|
-| 0.1 | 初始化 Tauri 2 + React + Vite 项目 | ⬜ | P0 | 2h | — | — | |
-| 0.2 | 配置 Tailwind CSS + shadcn/ui | ⬜ | P0 | 2h | — | 0.1 | |
-| 0.3 | 配置 TypeScript + ts-rs 类型生成管线 | ⬜ | P0 | 3h | — | 0.1 | |
-| 0.4 | 配置 ESLint + Prettier + prettier-plugin-tailwindcss | ⬜ | P0 | 2h | — | 0.1 | |
-| 0.5 | 搭建全局枚举目录（Rust enums/ + TS types/enums/） | ⬜ | P0 | 4h | — | 0.3 | |
-| 0.6 | 定义 FileTransport trait + adapter 工厂骨架 | ⬜ | P0 | 4h | — | 0.5 | |
-| 0.7 | 搭建 Rust 后端模块骨架 | ⬜ | P0 | 4h | — | 0.6 | |
-| 0.8 | 实现 AppSettings 配置读写 + 迁移逻辑（v1→v3） | ⬜ | P0 | 4h | — | 0.7 | |
-| 0.9 | 实现 SecretProtector 加密模块（AES-256-GCM + keyring） | ⬜ | P0 | 6h | — | 0.7 | |
-| 0.10 | 实现 i18next 国际化框架（EN + ZH） | ⬜ | P1 | 3h | — | 0.1 | |
-| 0.11 | 配置 GitHub Actions CI（桌面端构建） | ⬜ | P1 | 3h | — | 0.4 | |
-| 0.12 | 搭建响应式布局框架（桌面/平板/移动断点） | ⬜ | P1 | 4h | — | 0.2 | |
+| 0.1 | 初始化 Tauri 2 + React + Vite 项目 | ✅ | P0 | 2h | ~3h | — | Cargo.toml/tauri.conf/vite.config/package.json 就位 |
+| 0.2 | 配置 Tailwind CSS + shadcn/ui | ✅ | P0 | 2h | ~1h | 0.1 | Tailwind 4 + @tailwindcss/vite 配置完成 |
+| 0.3 | 配置 TypeScript + ts-rs 类型生成管线 | 🟡 | P0 | 3h | ~2h | 0.1 | 管线就位；ts-rs 运行时受限，类型手工占位 |
+| 0.4 | 配置 ESLint + Prettier + prettier-plugin-tailwindcss | ✅ | P0 | 2h | ~1h | 0.1 | ESLint 9 flat config + Prettier，lint 通过 |
+| 0.5 | 搭建全局枚举目录（Rust enums/ + TS types/enums/） | ✅ | P0 | 4h | ~3h | 0.3 | 12 枚举 + TS 占位类型全部就位 |
+| 0.6 | 定义 FileTransport trait + adapter 工厂骨架 | ✅ | P0 | 4h | ~2h | 0.5 | trait + create_adapter 工厂 + SFTP/WebDAV 骨架 |
+| 0.7 | 搭建 Rust 后端模块骨架 | ✅ | P0 | 4h | ~2h | 0.6 | core/crypto/storage/commands 骨架完成 |
+| 0.8 | 实现 AppSettings 配置读写 + 迁移逻辑（v1→v3） | 🟡 | P0 | 4h | ~2h | 0.7 | 骨架就位，迁移逻辑待 MSVC 验证 |
+| 0.9 | 实现 SecretProtector 加密模块（AES-256-GCM + keyring） | ✅ | P0 | 6h | ~3h | 0.7 | 加解密实现 + 3 单元测试，编译通过 |
+| 0.10 | 实现 i18next 国际化框架（EN + ZH） | ✅ | P1 | 3h | ~1h | 0.1 | i18next + react-i18next + en/zh locale |
+| 0.11 | 配置 GitHub Actions CI（桌面端构建） | ⬜ | P1 | 3h | — | 0.4 | 待后续 |
+| 0.12 | 搭建响应式布局框架（桌面/平板/移动断点） | 🟡 | P1 | 4h | ~1h | 0.2 | Tailwind 断点配置就位，布局组件待 Phase 1 |
 
 **里程碑:**
 
 | # | 里程碑 | 状态 |
 |---|--------|------|
-| M0.1 | `bun run tauri dev` 可启动空白应用 | ⬜ |
-| M0.2 | ESLint + Prettier 代码检查通过 | ⬜ |
-| M0.3 | 全局枚举目录建立，ts-rs 类型同步正常 | ⬜ |
-| M0.4 | FileTransport trait 定义完成，adapter 工厂骨架就绪 | ⬜ |
-| M0.5 | 配置文件读写正常，旧配置可迁移 | ⬜ |
-| M0.6 | 密码加解密单元测试通过 | ⬜ |
+| M0.1 | `bun run tauri dev` 可启动空白应用 | 🟡 代码就位，待 MSVC 运行时验证 |
+| M0.2 | ESLint + Prettier 代码检查通过 | ✅ |
+| M0.3 | 全局枚举目录建立，ts-rs 类型同步正常 | 🟡 枚举目录完成，ts-rs 运行时待修复 |
+| M0.4 | FileTransport trait 定义完成，adapter 工厂骨架就绪 | ✅ |
+| M0.5 | 配置文件读写正常，旧配置可迁移 | 🟡 骨架就位，待运行时验证 |
+| M0.6 | 密码加解密单元测试通过 | 🟡 实现完成+编译通过，运行时待验证 |
 | M0.7 | CI 自动构建桌面端产物 | ⬜ |
 
 ---
@@ -718,7 +823,14 @@ Phase 0 任务 0.4 配置：
 
 | # | 日期 | 问题描述 | 影响范围 | 状态 | 解决方案 | 解决日期 |
 |---|------|----------|----------|------|----------|----------|
-| — | — | — | — | — | — | — |
+| P1 | 2026-07-14 | 本机无 MSVC link.exe，Rust 默认工具链无法链接 | 全部 Rust 编译 | 🟡 已规避 | 安装 GNU 工具链 + link-self-contained | 2026-07-14 |
+| P2 | 2026-07-14 | GNU ld 链接 cdylib export ordinal 溢出 | cargo test/build | ✅ 已解决 | crate-type 改为仅 rlib | 2026-07-14 |
+| P3 | 2026-07-14 | 项目路径含空格致 windres 失败 | cargo test | ✅ 已解决 | CARGO_TARGET_DIR 设无空格路径 | 2026-07-14 |
+| P4 | 2026-07-14 | ts-rs 11 不支持 bitflags! derive(TS) | AdapterCapability | ✅ 已解决 | 改用 transparent newtype + type="number" | 2026-07-14 |
+| P5 | 2026-07-14 | ts-rs 11 移除 transparent 属性 | AdapterCapability | ✅ 已解决 | 改用 type = "number" | 2026-07-14 |
+| P6 | 2026-07-14 | ts-rs export() → export_all() API 变更 | export_types 测试 | ✅ 已解决 | 改用 export_all() | 2026-07-14 |
+| P7 | 2026-07-14 | Rust 测试运行时 STATUS_ENTRYPOINT_NOT_FOUND | cargo test 运行 | 🔴 阻塞 | 待安装 MSVC；编译已通过 | — |
+| P8 | 2026-07-14 | ts-rs 无法运行时导出类型 | TS 类型生成 | 🟡 已规避 | 手工生成占位类型文件 | 2026-07-14 |
 
 ---
 

@@ -1,0 +1,5 @@
+# 强制 rustc 使用自带的 MinGW 组件 + rust-lld 链接器（link-self-contained），
+# 避免拾取系统 PATH 上不兼容的 MinGW(MCF 变体) 与 SDCC 的 dlltool。
+# 仅用于无 MSVC Build Tools 环境下的编译验证；正式 Tauri 构建建议安装 VS Build Tools(MSVC)。
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "link-self-contained=yes"]
