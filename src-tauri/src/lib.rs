@@ -19,15 +19,48 @@ pub mod models;
 pub mod storage;
 pub mod transport;
 
+use core::SessionManager;
+
 /// 启动 Tauri 应用：组装命令并运行事件循环。
 ///
 /// 失败时打印错误而非 panic（遵循 AGENTS.md「禁止非测试 unwrap/expect」）。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let result = tauri::Builder::default()
+        .manage(SessionManager::new())
         .invoke_handler(tauri::generate_handler![
+            // 应用信息
             commands::get_app_info,
             commands::get_supported_protocols,
+            // 连接管理
+            commands::connect_host,
+            commands::disconnect_host,
+            commands::get_connection_status,
+            commands::get_connected_hosts,
+            commands::get_adapter_capabilities,
+            commands::ensure_session,
+            commands::release_session,
+            // 文件浏览
+            commands::list_directory,
+            commands::change_directory,
+            commands::get_working_directory,
+            commands::navigate_to_path,
+            commands::file_exists,
+            // 文件操作
+            commands::download_file,
+            commands::upload_file,
+            commands::upload_content,
+            commands::delete_file,
+            commands::create_directory,
+            commands::move_file,
+            // 设置
+            commands::load_settings,
+            commands::save_settings,
+            commands::get_hosts,
+            commands::save_host,
+            commands::delete_host,
+            commands::export_hosts,
+            commands::import_hosts,
         ])
         .run(tauri::generate_context!());
 

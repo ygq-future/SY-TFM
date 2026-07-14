@@ -20,15 +20,14 @@ export function UploadZone({ hostId }: { hostId: string }) {
 
       for (const file of files) {
         const remotePath = `${currentPath}/${file.name}`.replace(/\/+/g, '/');
-        // 读取本地文件内容并上传（Phase 1 简化：仅文本/小文件）
-        // TODO: Phase 2 实现大文件分块流式上传
+        // 读取本地文件内容并上传（Phase 1 简化：通过 upload_content 传内存内容）
+        // TODO: Phase 2 实现大文件分块流式上传（upload_file + 本地路径）
         try {
           const buffer = await file.arrayBuffer();
           const content = new Uint8Array(buffer);
-          // ts-rs 生成的 uploadFile 期望 string 或 Uint8Array
-          await tauri.uploadFile(hostId, remotePath, content);
+          await tauri.uploadContent(hostId, remotePath, content);
         } catch {
-          // 二进制文件无法转字符串时忽略，Phase 2 改用流式 API
+          // 上传失败时忽略单文件错误，继续处理其余文件
         }
       }
       await refresh(hostId);

@@ -8,6 +8,7 @@ import type { SortColumn } from '../types/enums/SortColumn';
 import type { RemoteHost } from '../types/generated/RemoteHost';
 import type { RemoteFile } from '../types/generated/RemoteFile';
 import type { AppSettings } from '../types/generated/AppSettings';
+import type { HostDto } from '../types/generated/HostDto';
 import type { ConnectionStatusPayload } from '../types/generated/ConnectionStatusPayload';
 
 // ============================================================
@@ -159,6 +160,19 @@ export async function uploadFile(
   await invoke('upload_file', { hostId, localPath, remotePath });
 }
 
+/** 上传内存内容（拖拽/新建文件用）。 */
+export async function uploadContent(
+  hostId: string,
+  remotePath: string,
+  content: Uint8Array | string,
+): Promise<void> {
+  const payload =
+    typeof content === 'string'
+      ? Array.from(new TextEncoder().encode(content))
+      : Array.from(content);
+  await invoke('upload_content', { hostId, remotePath, content: payload });
+}
+
 /** 删除文件/目录。 */
 export async function deleteFile(hostId: string, path: string): Promise<void> {
   await invoke('delete_file', { hostId, path });
@@ -201,6 +215,16 @@ export async function saveHost(host: RemoteHost): Promise<void> {
 /** 删除主机。 */
 export async function deleteHost(hostId: string): Promise<void> {
   await invoke('delete_host', { hostId });
+}
+
+/** 导出主机配置（不含密码）。 */
+export async function exportHosts(): Promise<HostDto[]> {
+  return invoke<HostDto[]>('export_hosts');
+}
+
+/** 导入主机配置。 */
+export async function importHosts(hosts: HostDto[]): Promise<void> {
+  await invoke('import_hosts', { hosts });
 }
 
 // ============================================================

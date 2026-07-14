@@ -189,9 +189,8 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   createFile: async (hostId, name) => {
     const { currentPath } = get();
     const path = `${currentPath}/${name}`.replace(/\/+/g, '/');
-    // 创建空文件：上传空内容（Phase 1 简化实现，复用 upload_file）
-    // TODO: 后端实现专用 create_file 命令以避免空上传开销
-    await tauri.uploadFile(hostId, path, '');
+    // 创建空文件：上传空内容（Phase 1 简化实现，复用 upload_content）
+    await tauri.uploadContent(hostId, path, '');
     await get().refresh(hostId);
   },
 }));
