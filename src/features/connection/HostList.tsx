@@ -3,6 +3,7 @@ import { Server, Plus, Trash2, Plug, PlugZap, Unplug, Pencil } from 'lucide-reac
 import { useConnectionStore } from '../../stores/connectionStore';
 import { cn } from '../../lib/utils';
 import { HostEditDialog } from './HostEditDialog';
+import { PasswordPromptDialog } from './PasswordPromptDialog';
 import type { RemoteHost } from '../../types/generated/RemoteHost';
 import type { Protocol } from '../../types/enums/Protocol';
 
@@ -39,6 +40,7 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
 
   const [editingHost, setEditingHost] = useState<RemoteHost | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [passwordPromptHost, setPasswordPromptHost] = useState<RemoteHost | null>(null);
 
   useEffect(() => {
     void loadHosts();
@@ -52,6 +54,15 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
   const openEditDialog = (host: RemoteHost) => {
     setEditingHost(host);
     setIsDialogOpen(true);
+  };
+
+  /** 连接主机：密码为空时弹出密码输入框。 */
+  const handleConnect = (host: RemoteHost) => {
+    if (!host.password) {
+      setPasswordPromptHost(host);
+    } else {
+      void connectHost(host.id);
+    }
   };
 
   return (
@@ -127,7 +138,7 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
                         title="连接"
                         onClick={(e) => {
                           e.stopPropagation();
-                          void connectHost(host.id);
+                          handleConnect(host);
                         }}
                       >
                         <Plug className="h-4 w-4" />
@@ -161,6 +172,16 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
         )}
       </div>
       {isDialogOpen && <HostEditDialog host={editingHost} onClose={() => setIsDialogOpen(false)} />}
+      {passwordPromptHost && (
+        <PasswordPromptDialog
+          hostName={passwordPromptHost.name}
+          onConfirm={(password) => {
+            void connectHost(passwordPromptHost.id, password);
+            setPasswordPromptHost(null);
+          }}
+          onCancel={() => setPasswordPromptHost(null)}
+        />
+      )}
     </div>
   );
 }
