@@ -9,6 +9,17 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   clearScreen: false,
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-i18next', 'i18next'],
+          'desktop-ui': ['@dnd-kit/core', 'lucide-react', 'sonner'],
+          'app-state': ['zustand', '@tanstack/react-query'],
+        },
+      },
+    },
+  },
   server: {
     port: 1420,
     strictPort: true,

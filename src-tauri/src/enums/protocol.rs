@@ -8,7 +8,7 @@ use ts_rs::TS;
 /// 2. 在 `transport/` 目录新建 adapter 文件；
 /// 3. 在 `create_adapter()` 工厂函数注册。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../src/types/enums/")]
+#[ts(export, export_to = "../../src/types/enums/")]
 #[serde(rename_all = "lowercase")]
 pub enum Protocol {
     /// SFTP - SSH File Transfer Protocol

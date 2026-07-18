@@ -4,10 +4,15 @@
 //! 枚举经 `ts-rs` 自动生成 TypeScript 类型到 `src/types/enums/`。
 
 pub mod adapter_capability;
+pub(crate) mod app_directory;
+pub(crate) mod app_event;
+pub(crate) mod connection_policy;
 pub mod connection_status;
 pub mod edit_mode;
+pub(crate) mod edit_policy;
 pub mod error_code;
 pub mod file_operation;
+pub mod http_scheme;
 pub mod language;
 pub mod platform;
 pub mod protocol;
@@ -15,12 +20,14 @@ pub mod sort_column;
 pub mod sort_order;
 pub mod theme;
 pub mod transfer_direction;
+pub(crate) mod transfer_policy;
 
 pub use adapter_capability::AdapterCapability;
 pub use connection_status::ConnectionStatus;
 pub use edit_mode::EditMode;
 pub use error_code::ErrorCode;
 pub use file_operation::FileOperation;
+pub use http_scheme::HttpScheme;
 pub use language::Language;
 pub use platform::Platform;
 pub use protocol::Protocol;

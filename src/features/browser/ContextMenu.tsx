@@ -1,41 +1,86 @@
-import { useEffect, useRef } from 'react';
-import { FolderPlus, FilePlus, Pencil, Trash2, Download, Upload } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  Code2,
+  Download,
+  FileDown,
+  FilePenLine,
+  FilePlus,
+  FolderPlus,
+  Pencil,
+  RefreshCw,
+  Trash2,
+} from 'lucide-react';
 import type { RemoteFile } from '../../types/generated/RemoteFile';
+import { ModalPortal } from '../../components/shared/ModalPortal';
+import {
+  getContextMenuPosition,
+  getFileContextActions,
+  type FileContextAction,
+} from './browserViewModel';
 
 /** 右键上下文菜单。 */
 export function ContextMenu({
   x,
   y,
   file,
+  selectionCount,
   onClose,
   onMkdir,
   onCreateFile,
   onRename,
   onDelete,
   onDownload,
-  onUpload,
+  onDownloadTo,
+  onRefresh,
+  onRemoteEdit,
+  onOnlineEdit,
 }: {
   x: number;
   y: number;
   file: RemoteFile | null;
+  selectionCount: number;
   onClose: () => void;
   onMkdir: () => void;
   onCreateFile: () => void;
   onRename: () => void;
   onDelete: () => void;
   onDownload: () => void;
-  onUpload: () => void;
+  onDownloadTo: () => void;
+  onRefresh: () => void;
+  onRemoteEdit: () => void;
+  onOnlineEdit: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: x + 2, top: y + 2 });
+  const actions = getFileContextActions(file, selectionCount);
+
+  useLayoutEffect(() => {
+    const updatePosition = () => {
+      if (!ref.current) return;
+      const bounds = ref.current.getBoundingClientRect();
+      setPosition(
+        getContextMenuPosition(
+          x,
+          y,
+          bounds.width,
+          bounds.height,
+          window.innerWidth,
+          window.innerHeight,
+        ),
+      );
+    };
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    return () => window.removeEventListener('resize', updatePosition);
+  }, [actions.length, x, y]);
 
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose();
-      }
+    const handleClickOutside = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) onClose();
     };
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
     };
     document.addEventListener('mousedown', handleClickOutside);
     document.addEventListener('keydown', handleEscape);
@@ -45,103 +90,107 @@ export function ContextMenu({
     };
   }, [onClose]);
 
-  // 调整位置避免溢出视窗
-  const adjustedX = Math.min(x, window.innerWidth - 200);
-  const adjustedY = Math.min(y, window.innerHeight - 280);
-
-  const hasFile = file !== null && file.name !== '..';
+  const run = (action: () => void) => {
+    action();
+    onClose();
+  };
 
   return (
-    <div
-      ref={ref}
-      className="fixed z-50 w-48 rounded-md border bg-white py-1 text-sm shadow-lg dark:border-gray-700 dark:bg-gray-800"
-      style={{ left: adjustedX, top: adjustedY }}
-    >
+    <ModalPortal>
+      <div ref={ref} className="context-menu" role="menu" style={position}>
+        {actions.map((action, index) => (
+          <MenuAction
+            key={action}
+            action={action}
+            dividerBefore={action === 'refresh' && index > 0}
+            onRun={(selectedAction) => {
+              const handlers: Partial<Record<FileContextAction, () => void>> = {
+                download: onDownload,
+                downloadTo: onDownloadTo,
+                remoteEdit: onRemoteEdit,
+                onlineEdit: onOnlineEdit,
+                rename: onRename,
+                delete: onDelete,
+                refresh: onRefresh,
+                mkdir: onMkdir,
+                createFile: onCreateFile,
+              };
+              const handler = handlers[selectedAction];
+              if (handler) run(handler);
+            }}
+          />
+        ))}
+      </div>
+    </ModalPortal>
+  );
+}
+
+const menuPresentation: Record<
+  FileContextAction,
+  { icon: React.ComponentType<{ className?: string }>; labelKey: string; danger?: boolean }
+> = {
+  download: { icon: Download, labelKey: 'contextMenu.download' },
+  downloadTo: { icon: FileDown, labelKey: 'contextMenu.downloadTo' },
+  remoteEdit: { icon: FilePenLine, labelKey: 'contextMenu.remoteEdit' },
+  onlineEdit: { icon: Code2, labelKey: 'contextMenu.onlineEdit' },
+  rename: { icon: Pencil, labelKey: 'contextMenu.rename' },
+  delete: { icon: Trash2, labelKey: 'contextMenu.delete', danger: true },
+  refresh: { icon: RefreshCw, labelKey: 'contextMenu.refresh' },
+  mkdir: { icon: FolderPlus, labelKey: 'contextMenu.newFolder' },
+  createFile: { icon: FilePlus, labelKey: 'contextMenu.newFile' },
+};
+
+function MenuAction({
+  action,
+  dividerBefore,
+  onRun,
+}: {
+  action: FileContextAction;
+  dividerBefore: boolean;
+  onRun: (action: FileContextAction) => void;
+}) {
+  const { t } = useTranslation();
+  const item = menuPresentation[action];
+  return (
+    <>
+      {dividerBefore && <Divider />}
       <MenuItem
-        icon={FolderPlus}
-        label="新建文件夹"
-        onClick={() => {
-          onMkdir();
-          onClose();
-        }}
+        icon={item.icon}
+        label={t(item.labelKey)}
+        danger={item.danger}
+        onClick={() => onRun(action)}
       />
-      <MenuItem
-        icon={FilePlus}
-        label="新建文件"
-        onClick={() => {
-          onCreateFile();
-          onClose();
-        }}
-      />
-      <Divider />
-      {hasFile && (
-        <MenuItem
-          icon={Pencil}
-          label="重命名"
-          onClick={() => {
-            onRename();
-            onClose();
-          }}
-        />
-      )}
-      {hasFile && (
-        <MenuItem
-          icon={Download}
-          label="下载"
-          onClick={() => {
-            onDownload();
-            onClose();
-          }}
-        />
-      )}
-      <MenuItem
-        icon={Upload}
-        label="上传到此处"
-        onClick={() => {
-          onUpload();
-          onClose();
-        }}
-      />
-      {hasFile && <Divider />}
-      {hasFile && (
-        <MenuItem
-          icon={Trash2}
-          label="删除"
-          danger
-          onClick={() => {
-            onDelete();
-            onClose();
-          }}
-        />
-      )}
-    </div>
+    </>
   );
 }
 
 function MenuItem({
   icon: Icon,
   label,
+  hint,
   onClick,
   danger,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
+  hint?: string;
   onClick: () => void;
   danger?: boolean;
 }) {
   return (
     <button
-      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-100 dark:hover:bg-gray-700 ${
-        danger ? 'text-red-500' : ''
-      }`}
+      type="button"
+      role="menuitem"
+      className={danger ? 'context-item context-item--danger' : 'context-item'}
       onClick={onClick}
     >
-      <Icon className="h-3.5 w-3.5" />
-      {label}
+      <Icon />
+      <span>{label}</span>
+      {hint && <kbd>{hint}</kbd>}
     </button>
   );
 }
 
 function Divider() {
-  return <div className="my-1 border-t border-gray-100 dark:border-gray-700" />;
+  return <div className="context-divider" />;
 }

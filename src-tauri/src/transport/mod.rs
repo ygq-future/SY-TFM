@@ -53,7 +53,7 @@ pub trait FileTransport: Send + Sync {
     async fn connect(&mut self, host: &RemoteHost, password: Option<&str>) -> Result<(), AppError>;
 
     /// 断开连接。
-    async fn disconnect(&mut self) -> Result<(), AppError>;
+    async fn disconnect(&self) -> Result<(), AppError>;
 
     /// 列出目录内容。
     async fn list_directory(&self, path: &str) -> Result<Vec<RemoteFile>, AppError>;

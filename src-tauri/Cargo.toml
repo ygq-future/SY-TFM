@@ -1,16 +1,14 @@
 [package]
 name = "sy-tfm"
-version = "0.1.0"
+version = "1.0.0"
 description = "SY-TFM — Tiny File Manager"
-authors = ["SY"]
+authors = ["Sheepyu"]
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.85"
 
 [lib]
-name = "sy_tfm"
-# 桌面端仅需 rlib；移动端（Android/iOS）构建时需追加 "staticlib", "cdylib"。
-# 当前环境无 MSVC，GNU ld 链接 cdylib 时 export ordinal 溢出，故桌面开发期仅保留 rlib。
-crate-type = ["rlib"]
+name = "sy_tfm_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -20,10 +18,9 @@ tauri = { version = "2", features = [] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.47", features = ["full"] }
-# 协议实现库：Phase 0 为骨架（adapter 为 stub，不引用这些库），
-# 故设为 optional；Phase 1 实现 adapter 时启用对应 feature。
-# 注：reqwest(rustls→aws-lc-sys) 在 Windows 需 cmake + nasm 才能编译 C 部分。
-russh = { version = "0.54", optional = true }
+# 协议实现库：optional，通过 feature 门控。
+# russh 间接依赖 aws-lc-sys，reqwest(rustls) 直接依赖 aws-lc-sys，均需 cmake + nasm。
+russh = { version = "0.62.2", optional = true }
 russh-sftp = { version = "2", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"], optional = true }
 quick-xml = { version = "0.38", features = ["serialize"], optional = true }
@@ -31,24 +28,27 @@ futures-util = { version = "0.3", optional = true }
 chrono = "0.4"
 aes-gcm = "0.10"
 argon2 = "0.5"
-keyring = "3"
+keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native-sync-persistent", "crypto-rust"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 directories = "6"
 parking_lot = "0.12"
 notify = "8"
+fs2 = "0.4"
 tracing = "0.1"
 anyhow = "1"
 thiserror = "2"
 async-trait = "0.1"
 base64 = "0.22"
 ts-rs = { version = "11", features = ["uuid-impl", "serde-json-impl"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
 
 [features]
-# 默认特性集（骨架：不含协议实现库，便于在无 nasm 环境下编译验证）
-default = []
-# 启用 SFTP adapter（russh 纯 Rust，无需 nasm）
+# Phase 1 默认启用首版的 SFTP 与 WebDAV adapter。
+default = ["protocol-adapters"]
+# 启用 SFTP adapter（russh + russh-sftp）
 sftp-adapter = ["dep:russh", "dep:russh-sftp"]
-# 启用 WebDAV adapter（reqwest+rustls 需 nasm）
+# 启用 WebDAV adapter（reqwest + quick-xml + futures-util）
 webdav-adapter = ["dep:reqwest", "dep:quick-xml", "dep:futures-util"]
 # 启用全部协议 adapter
 protocol-adapters = ["sftp-adapter", "webdav-adapter"]

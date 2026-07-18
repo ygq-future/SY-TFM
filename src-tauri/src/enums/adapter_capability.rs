@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
+use ts_rs::TS;
 
 /// Adapter 能力标志位。
 ///
@@ -10,7 +10,7 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 /// 注：使用 transparent newtype 而非 `bitflags!` 宏，因 ts-rs 11 不支持
 /// 在 `bitflags!` 生成的类型上 derive `TS`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../src/types/enums/", type = "number")]
+#[ts(export, export_to = "../../src/types/enums/", type = "number")]
 pub struct AdapterCapability(pub u32);
 
 impl AdapterCapability {

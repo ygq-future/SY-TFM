@@ -33,6 +33,12 @@ impl AppError {
         self.details = Some(details);
         self
     }
+
+    /// 可选地附加详情。
+    pub fn with_optional_details(mut self, details: Option<serde_json::Value>) -> Self {
+        self.details = details;
+        self
+    }
 }
 
 // 便捷构造
@@ -44,7 +50,10 @@ impl AppError {
 
     /// 会话未找到错误。
     pub fn session_not_found(id: impl std::fmt::Display) -> Self {
-        Self::new(ErrorCode::SessionNotFound, format!("Session not found: {id}"))
+        Self::new(
+            ErrorCode::SessionNotFound,
+            format!("Session not found: {id}"),
+        )
     }
 
     /// 连接失败错误。

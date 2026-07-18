@@ -6,7 +6,7 @@ use crate::enums::ConnectionStatus;
 
 /// 单文件传输进度事件数据。
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../src/types/generated/")]
+#[ts(export, export_to = "../../src/types/generated/ProgressPayload.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct ProgressPayload {
     /// 主机 ID
@@ -14,8 +14,10 @@ pub struct ProgressPayload {
     /// 操作 ID
     pub operation_id: String,
     /// 已传输字节数
+    #[ts(type = "number")]
     pub transferred: u64,
     /// 总字节数
+    #[ts(type = "number")]
     pub total: u64,
     /// 进度百分比
     pub percent: f64,
@@ -27,7 +29,10 @@ pub struct ProgressPayload {
 
 /// 批量传输进度事件数据。
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../src/types/generated/")]
+#[ts(
+    export,
+    export_to = "../../src/types/generated/BatchProgressPayload.ts"
+)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchProgressPayload {
     /// 主机 ID
@@ -46,7 +51,10 @@ pub struct BatchProgressPayload {
 
 /// 连接状态变更事件数据。
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../src/types/generated/")]
+#[ts(
+    export,
+    export_to = "../../src/types/generated/ConnectionStatusPayload.ts"
+)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionStatusPayload {
     /// 主机 ID

@@ -290,9 +290,9 @@ pub struct RemoteHost {
     /// 协议类型（用户显式选择，不再通过端口推断）
     #[serde(default = "default_protocol")]
     pub protocol: Protocol,
-    /// 主机地址（IP 或域名）
+    /// SFTP 为 IP/域名；WebDAV 为认证 URL 中除协议外的地址与路径
     pub host: String,
-    /// 端口号
+    /// SFTP 端口；WebDAV 新配置固定为 0（兼容旧配置中的显式端口）
     #[serde(default)]
     pub port: u16,
     /// 用户名（默认 "anonymous"）
@@ -307,10 +307,10 @@ pub struct RemoteHost {
     /// 每主机下载路径覆盖（null = 使用全局默认）
     #[serde(default)]
     pub download_path: Option<String>,
-    /// WebDAV 专用：是否使用 HTTPS
+    /// WebDAV 专用：协议选择（true = HTTPS，false = HTTP）
     #[serde(default = "default_https")]
     pub https: bool,
-    /// WebDAV 专用：基础路径前缀（如 "/remote.php/dav/files/user"）
+    /// WebDAV 专用：可选基础路径，追加到认证 URL 之后
     #[serde(default)]
     pub base_path: Option<String>,
     /// 运行时连接状态（不持久化）
@@ -408,14 +408,14 @@ export interface RemoteHost {
   "id": "660e8400-e29b-41d4-a716-446655440001",
   "name": "Nextcloud WebDAV",
   "protocol": "webdav",
-  "host": "cloud.example.com",
-  "port": 443,
+  "host": "dav.example.com/remote.php/dav",
+  "port": 0,
   "username": "user",
   "password": "enc.v1:SGVsbG8gV29ybGQ...",
   "tags": "cloud,personal",
   "downloadPath": null,
   "https": true,
-  "basePath": "/remote.php/dav/files/user"
+  "basePath": "/team/files"
 }
 ```
 
@@ -524,9 +524,33 @@ pub struct AppSettings {
     /// 背景图片路径（桌面端）
     #[serde(default)]
     pub background_image_path: Option<String>,
+    /// 是否启用已保存的背景图片
+    #[serde(default = "default_background_enabled")]
+    pub background_image_enabled: bool,
     /// 背景图片不透明度 (0.1 - 1.0)
     #[serde(default = "default_bg_opacity")]
     pub background_opacity: f64,
+    /// 全局毛玻璃模糊半径（像素）
+    #[serde(default = "default_glass_blur")]
+    pub glass_blur: f64,
+    /// 全局毛玻璃表面不透明度
+    #[serde(default = "default_glass_opacity")]
+    pub glass_opacity: f64,
+    /// 正文与控件字号
+    #[serde(default = "default_font_size")]
+    pub font_size: f64,
+    /// 页面和弹窗标题字号
+    #[serde(default = "default_heading_font_size")]
+    pub heading_font_size: f64,
+    /// 表单标签与表头字号
+    #[serde(default = "default_label_font_size")]
+    pub label_font_size: f64,
+    /// 提示、说明与辅助信息字号
+    #[serde(default = "default_caption_font_size")]
+    pub caption_font_size: f64,
+    /// 文件元数据、路径和状态栏字号
+    #[serde(default = "default_data_font_size")]
+    pub data_font_size: f64,
     /// 配置版本号（用于迁移）
     #[serde(default = "default_config_version")]
     pub config_version: u32,
@@ -549,7 +573,15 @@ impl Default for AppSettings {
             hosts: vec![],
             window_topmost: false,
             background_image_path: None,
+            background_image_enabled: true,
             background_opacity: default_bg_opacity(),
+            glass_blur: 22.0,
+            glass_opacity: 0.72,
+            font_size: 13.0,
+            heading_font_size: 15.0,
+            label_font_size: 12.0,
+            caption_font_size: 11.0,
+            data_font_size: 12.0,
             config_version: default_config_version(),
         }
     }
@@ -568,7 +600,15 @@ impl Default for AppSettings {
   "hosts": [ ... ],
   "windowTopmost": false,
   "backgroundImagePath": null,
+  "backgroundImageEnabled": true,
   "backgroundOpacity": 0.3,
+  "glassBlur": 22.0,
+  "glassOpacity": 0.72,
+  "fontSize": 13.0,
+  "headingFontSize": 15.0,
+  "labelFontSize": 12.0,
+  "captionFontSize": 11.0,
+  "dataFontSize": 12.0,
   "configVersion": 3
 }
 ```
@@ -633,8 +673,9 @@ impl From<RemoteHost> for HostDto {
 
 use std::time::Instant;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use std::collections::HashMap;
+use parking_lot::Mutex;
+use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
 use crate::transport::FileTransport;
@@ -714,18 +755,25 @@ use tokio::sync::RwLock;
 use std::collections::HashMap;
 
 pub struct EditSession {
-    pub id: Uuid,
     pub host_id: Uuid,
     pub remote_path: String,
-    pub temp_path: PathBuf,
+    pub file_name: String,
+    pub local_path: PathBuf,
     pub valid: Arc<AtomicBool>,
-    pub watcher_handle: Option<notify::RecommendedWatcher>,
+    pub watcher: notify::RecommendedWatcher,
+    lease: Option<std::fs::File>, // 持有会话目录 .lock 的跨进程独占锁
 }
 
 pub struct EditSessionManager {
-    sessions: Arc<RwLock<HashMap<Uuid, EditSession>>>,  // key = host_id
+    sessions: Mutex<HashMap<Uuid, EditSession>>, // key = edit_session_id
+    start_guard: AsyncMutex<()>, // 串行化会话查重与创建
 }
 ```
+
+活动会话以 `(host_id, remote_path)` 作为复用键。系统编辑器窗口关闭不会终止 watcher；
+只要主机连接仍有效且临时文件存在，后续 Remote Edit 会直接重新打开同一个本地文件。
+应用启动时会扫描 `%TEMP%/SY-TFM/<session-uuid>/`，只清理能够取得独占租约的失效会话；
+其他 SY-TFM 实例仍持有锁的目录与非会话目录均会保留。
 
 ---
 

@@ -3,7 +3,7 @@ use ts_rs::TS;
 
 /// 统一错误码（驱动前端错误处理）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../src/types/enums/")]
+#[ts(export, export_to = "../../src/types/enums/")]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     /// 连接失败
@@ -16,6 +16,10 @@ pub enum ErrorCode {
     ConnectionTimeout,
     /// 主机不可达
     HostUnreachable,
+    /// SFTP 主机密钥尚未信任
+    HostKeyUnknown,
+    /// SFTP 主机密钥与已信任值不一致
+    HostKeyChanged,
     /// 文件未找到
     FileNotFound,
     /// 权限拒绝

@@ -3,6 +3,7 @@ import type { AdapterCapability } from '../types/enums/AdapterCapability';
 import type { ConnectionStatus } from '../types/enums/ConnectionStatus';
 import type { RemoteHost } from '../types/generated/RemoteHost';
 import * as tauri from '../lib/tauri';
+import { formatAppError } from '../lib/errors';
 
 /** 连接管理状态。 */
 interface ConnectionState {
@@ -27,7 +28,7 @@ interface ConnectionState {
   connectHost: (id: string, password?: string) => Promise<void>;
   disconnectHost: (id: string) => Promise<void>;
   addHost: (host: RemoteHost) => Promise<void>;
-  updateHost: (host: RemoteHost) => Promise<void>;
+  updateHost: (host: RemoteHost, clearPassword?: boolean) => Promise<void>;
   deleteHost: (id: string) => Promise<void>;
   setConnectionStatus: (hostId: string, status: ConnectionStatus) => void;
 }
@@ -47,14 +48,20 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
       const hosts = await tauri.getHosts();
       set({ hosts, isLoading: false });
     } catch (e) {
-      set({ isLoading: false, error: String(e) });
+      set({ isLoading: false, error: formatAppError(e) });
     }
   },
 
   selectHost: (id) => set({ selectedHostId: id }),
 
   connectHost: async (id, password) => {
-    set({ error: null });
+    set((state) => ({
+      error: null,
+      connectionStatus: {
+        ...state.connectionStatus,
+        [id]: 'connecting' as ConnectionStatus,
+      },
+    }));
     try {
       const result = await tauri.connectHost(id, password);
       set((state) => ({
@@ -65,7 +72,14 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
         hostCapabilities: { ...state.hostCapabilities, [id]: result.capabilities },
       }));
     } catch (e) {
-      set({ error: String(e) });
+      set((state) => ({
+        error: formatAppError(e),
+        connectedHostIds: state.connectedHostIds.filter((hostId) => hostId !== id),
+        connectionStatus: {
+          ...state.connectionStatus,
+          [id]: 'error' as ConnectionStatus,
+        },
+      }));
       throw e;
     }
   },
@@ -78,21 +92,19 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
         selectedHostId: state.selectedHostId === id ? null : state.selectedHostId,
       }));
     } catch (e) {
-      set({ error: String(e) });
+      set({ error: formatAppError(e) });
       throw e;
     }
   },
 
   addHost: async (host) => {
     await tauri.saveHost(host);
-    set((state) => ({ hosts: [...state.hosts, host] }));
+    set({ hosts: await tauri.getHosts() });
   },
 
-  updateHost: async (host) => {
-    await tauri.saveHost(host);
-    set((state) => ({
-      hosts: state.hosts.map((h) => (h.id === host.id ? host : h)),
-    }));
+  updateHost: async (host, clearPassword = false) => {
+    await tauri.saveHost(host, clearPassword);
+    set({ hosts: await tauri.getHosts() });
   },
 
   deleteHost: async (id) => {
@@ -105,7 +117,19 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
   },
 
   setConnectionStatus: (hostId, status) =>
-    set((state) => ({
-      connectionStatus: { ...state.connectionStatus, [hostId]: status },
-    })),
+    set((state) => {
+      const isConnected = status === 'connected';
+      const isDisconnected = status === 'disconnected';
+      const isError = status === 'error';
+      return {
+        connectionStatus: { ...state.connectionStatus, [hostId]: status },
+        connectedHostIds: isConnected
+          ? state.connectedHostIds.includes(hostId)
+            ? state.connectedHostIds
+            : [...state.connectedHostIds, hostId]
+          : isDisconnected || isError
+            ? state.connectedHostIds.filter((id) => id !== hostId)
+            : state.connectedHostIds,
+      };
+    }),
 }));

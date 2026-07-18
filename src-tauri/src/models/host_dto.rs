@@ -5,7 +5,7 @@ use crate::enums::Protocol;
 
 /// 主机传输对象（用于配置导入/导出，绕过机器特定加密）。
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../src/types/generated/")]
+#[ts(export, export_to = "../../src/types/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct HostDto {
     /// 显示名称
@@ -49,5 +49,35 @@ impl From<crate::models::RemoteHost> for HostDto {
             https: h.https,
             base_path: h.base_path,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::models::RemoteHost;
+
+    #[test]
+    fn exported_host_dto_does_not_include_sftp_fingerprint() {
+        let dto = HostDto::from(RemoteHost {
+            id: Uuid::new_v4(),
+            name: "server".to_string(),
+            protocol: Protocol::Sftp,
+            host: "sftp.example.com".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            password: String::new(),
+            tags: String::new(),
+            download_path: None,
+            https: true,
+            base_path: None,
+            sftp_host_key_fingerprint: Some("SHA256:private-trust".to_string()),
+            is_connected: false,
+        });
+
+        let json = serde_json::to_value(dto).expect("serialize DTO");
+        assert!(json.get("sftpHostKeyFingerprint").is_none());
     }
 }

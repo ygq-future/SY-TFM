@@ -187,7 +187,7 @@ locales/      en.json / zh.json（i18n）
 
 - 采用渐进式 6 阶段（见 `docs/05-implementation-plan.md`）：
   `Phase 0 骨架 → Phase 1 桌面 MVP → Phase 2 功能补全 → Phase 3 移动端 → Phase 4 优化打磨 → Phase 5 发布`。
-- 当前阶段：**Phase 0（项目骨架，代码实现 0%）**。
+- 当前阶段：**Phase 2 已完成（Windows 桌面基线 v1.0.0）；下一阶段为 Phase 3 移动端适配**。
 - **前端包管理器统一使用 bun**（不使用 npm）；文档与脚本中所有 `npm run ...` 一律改写为 `bun run ...`。
 - **阶段性质量门禁（强制）**：每完成一个阶段性功能（里程碑 / Phase / 可提交的功能点），
   必须依次运行 `bun lint && bun format && bun test`，三者全部通过后方可提交代码或进入下一阶段。
@@ -227,7 +227,7 @@ locales/      en.json / zh.json（i18n）
 | Crate | 版本 |
 |-------|------|
 | tokio | 1.47 |
-| russh | 0.54 |
+| russh | 0.62.2 |
 | reqwest | 0.12 |
 | quick-xml | 0.38 |
 | aes-gcm | 0.10 |
@@ -236,6 +236,7 @@ locales/      en.json / zh.json（i18n）
 | serde_json | 1.0 |
 | ts-rs | 11 |
 | notify | 8 |
+| fs2 | 0.4 |
 | tracing | 0.1 |
 | anyhow | 1 |
 | thiserror | 2 |

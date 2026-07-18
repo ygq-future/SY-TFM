@@ -3,7 +3,7 @@ use ts_rs::TS;
 
 /// 文件传输方向。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../src/types/enums/")]
+#[ts(export, export_to = "../../src/types/enums/")]
 #[serde(rename_all = "camelCase")]
 pub enum TransferDirection {
     /// 本地 → 远程

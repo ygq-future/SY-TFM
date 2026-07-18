@@ -6,7 +6,7 @@ use crate::enums::Protocol;
 
 /// 远程主机配置（替代旧版 FtpHost，支持多种协议）。
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../src/types/generated/")]
+#[ts(export, export_to = "../../src/types/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteHost {
     /// 唯一标识符
@@ -39,6 +39,9 @@ pub struct RemoteHost {
     /// WebDAV 专用：基础路径前缀（如 "/remote.php/dav/files/user"）
     #[serde(default)]
     pub base_path: Option<String>,
+    /// SFTP 主机公钥 SHA-256 指纹（TOFU 信任锚）。
+    #[serde(default)]
+    pub sftp_host_key_fingerprint: Option<String>,
     /// 运行时连接状态（不持久化）
     #[serde(skip)]
     pub is_connected: bool,
@@ -86,6 +89,7 @@ impl RemoteHost {
             download_path: self.download_path.clone(),
             https: self.https,
             base_path: self.base_path.clone(),
+            sftp_host_key_fingerprint: None,
             is_connected: false,
         }
     }
@@ -97,5 +101,51 @@ impl RemoteHost {
         } else {
             self.port
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_host() -> RemoteHost {
+        RemoteHost {
+            id: Uuid::new_v4(),
+            name: "server".to_string(),
+            protocol: Protocol::Sftp,
+            host: "sftp.example.com".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            password: String::new(),
+            tags: String::new(),
+            download_path: None,
+            https: true,
+            base_path: None,
+            sftp_host_key_fingerprint: Some("SHA256:trusted".to_string()),
+            is_connected: false,
+        }
+    }
+
+    #[test]
+    fn old_json_defaults_sftp_fingerprint_to_none() {
+        let value = serde_json::to_value(sample_host()).expect("serialize host");
+        let mut object = value.as_object().expect("host object").clone();
+        object.remove("sftpHostKeyFingerprint");
+        let decoded: RemoteHost = serde_json::from_value(serde_json::Value::Object(object))
+            .expect("deserialize old host");
+        assert_eq!(decoded.sftp_host_key_fingerprint, None);
+    }
+
+    #[test]
+    fn fingerprint_round_trips_but_clone_forgets_trust() {
+        let host = sample_host();
+        let decoded: RemoteHost =
+            serde_json::from_value(serde_json::to_value(&host).expect("serialize host"))
+                .expect("deserialize host");
+        assert_eq!(
+            decoded.sftp_host_key_fingerprint.as_deref(),
+            Some("SHA256:trusted")
+        );
+        assert_eq!(host.clone_config().sftp_host_key_fingerprint, None);
     }
 }

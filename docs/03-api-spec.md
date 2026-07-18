@@ -72,6 +72,21 @@ invoke('connect_host', {
 
 ---
 
+### 2.1.1 test_host_connection
+
+使用新建/编辑表单中的配置建立一次隔离连接，用于提交前验证。该命令不保存配置，也不占用正式会话；编辑已有主机且未重新输入密码时，会按相同 `id` 读取已保存的加密密码。
+
+```typescript
+invoke('test_host_connection', {
+  host: RemoteHost,
+  password?: string,
+})
+```
+
+**返回值：** `void`
+
+---
+
 ### 2.2 disconnect_host
 
 断开主机连接。
@@ -309,15 +324,33 @@ invoke('get_file_size', {
 
 ## 4. 文件操作接口
 
+### 4.0 可取消传输生命周期
+
+上传、下载和跨面板传输开始前必须注册独立的 `operationId`，结束后释放；同一会话允许多个任务并发执行。
+
+```typescript
+invoke('begin_transfer', { operationId: string, hostIds: string[] })
+invoke('cancel_transfer', { operationId: string }) // 返回是否已接受取消
+invoke('finish_transfer', { operationId: string })
+```
+
+传输连续 45 秒没有字节进度时返回 `OperationTimeout`；主动取消返回 `OperationCancelled`。断开主机前会先取消涉及该主机的全部任务。
+
+---
+
 ### 4.1 download_file
 
-下载单个文件。
+下载单个文件或递归下载目录。
 
 ```typescript
 invoke('download_file', {
-  hostId: string,
-  remotePath: string,
-  localPath: string,     // 本地保存路径
+  request: {
+    hostId: string,
+    remotePath: string,
+    localPath: string,     // 本地保存路径
+    isDirectory: boolean,
+    operationId: string,
+  },
 })
 ```
 
@@ -383,8 +416,11 @@ invoke('upload_file', {
   hostId: string,
   localPath: string,
   remotePath: string,
+  operationId: string,
 })
 ```
+
+本地路径可以是文件或目录；目录会被递归创建和流式上传。Windows 资源管理器拖入使用该接口传递原生路径，不把整个文件读入 WebView 内存。
 
 **返回值：** `void`
 
@@ -537,16 +573,20 @@ invoke('cancel_operation', {
 
 ## 5. 跨主机传输接口
 
-### 5.1 transfer_file
+### 5.1 transfer_entry
 
-在两个主机间传输文件（支持跨协议，如 SFTP → WebDAV）。
+在两个面板的已连接主机间传输文件或递归传输目录（支持跨协议，如 SFTP → WebDAV）。
 
 ```typescript
-invoke('transfer_file', {
-  sourceHostId: string,
-  sourcePath: string,
-  destHostId: string,
-  destPath: string,
+invoke('transfer_entry', {
+  request: {
+    sourceHostId: string,
+    targetHostId: string,
+    sourcePath: string,
+    targetPath: string,
+    isDirectory: boolean,
+    operationId: string,
+  },
 })
 ```
 
@@ -559,21 +599,18 @@ invoke('transfer_file', {
 | `transfer:done` | `{ sourceHostId: string, destHostId: string, sourcePath: string, destPath: string }` |
 | `transfer:error` | `{ sourceHostId: string, destHostId: string, code: ErrorCode, message: string }` |
 
-> **实现说明：** 跨协议传输通过本地临时文件中转：先从源 adapter 下载到临时文件，再从临时文件上传到目标 adapter。
+> **实现说明：** 跨协议传输通过本地临时文件中转：先从源 adapter 下载到临时文件，再从临时文件上传到目标 adapter；这是两个顺序阶段，并非服务器之间的直连传输。
 
 ---
 
-### 5.2 transfer_files
+### 5.2 批量传输
 
-批量跨主机传输。
+前端为一个 `operationId` 顺序调用多次 `transfer_entry`，状态栏以一个任务显示总数量、单文件进度、速度与取消入口。
 
 ```typescript
-invoke('transfer_files', {
-  sourceHostId: string,
-  destHostId: string,
-  items: Array<{ path: string; isDirectory: boolean }>,
-  destDir: string,
-})
+for (const item of items) {
+  await transferEntry(item, operationId);
+}
 ```
 
 **返回值：** `void`
@@ -582,66 +619,68 @@ invoke('transfer_files', {
 
 ## 6. 远程编辑接口
 
-### 6.1 edit_remote_external
+### 6.1 start_remote_edit
 
 使用外部编辑器编辑远程文件（桌面端）。
 
 ```typescript
-invoke('edit_remote_external', {
+invoke('start_remote_edit', {
   hostId: string,
-  filePath: string,
+  remotePath: string,
+  fileName: string,
 })
 ```
 
 **返回值：**
 ```typescript
 {
-  tempPath: string;     // 本地临时文件路径
+  localPath: string;     // %TEMP%/SY-TFM/源文件名_UUID.扩展名
   editSessionId: string; // 编辑会话 ID
+  fileName: string;
+  remotePath: string;
 }
 ```
+
+同一连接中再次对相同 `remotePath` 启动 Remote Edit 时，返回现有会话与临时文件，
+不会重新下载、覆盖本地编辑内容或创建第二个 watcher。
 
 **事件：**
 | 事件 | Payload |
 |------|---------|
-| `editor:synced` | `{ hostId: string, filePath: string, syncTime: string }` |
-| `editor:error` | `{ hostId: string, filePath: string, code: ErrorCode, message: string }` |
-| `editor:session_invalid` | `{ editSessionId: string }` |
+| `editor:synced` | `{ hostId, filePath, fileName, syncTime }` |
+| `editor:error` | `{ hostId, filePath, fileName, code, message }` |
+| `editor:session-invalid` | `{ editSessionId, hostId, filePath }` |
 
 ---
 
-### 6.2 edit_remote_online
+### 6.2 read_remote_text
 
 下载文件内容供内置编辑器编辑（在线编辑模式）。
 
 ```typescript
-invoke('edit_remote_online', {
+invoke('read_remote_text', {
   hostId: string,
-  filePath: string,
+  remotePath: string,
 })
 ```
 
 **返回值：**
 ```typescript
-{
-  content: string;      // 文件文本内容
-  encoding: string;     // "utf-8" | "binary"
-  size: number;
-  language: string;     // 检测到的语言 "rust" | "python" | "json" | ...
-}
+`string`（UTF-8 文本，最大 5 MiB）。语言由前端 CodeMirror 根据文件名按需检测和加载。
 ```
 
 ---
 
-### 6.3 save_remote_online
+### 6.3 upload_content
 
 保存内置编辑器内容到远程。
 
 ```typescript
-invoke('save_remote_online', {
+invoke('upload_content', {
   hostId: string,
-  filePath: string,
-  content: string,
+  remotePath: string,
+  content: number[],
+  operationId: string,
 })
 ```
 
@@ -649,17 +688,29 @@ invoke('save_remote_online', {
 
 ---
 
-### 6.4 stop_edit_sessions
+### 6.4 list_remote_edit_sessions
+
+列出指定连接中仍有效且临时文件仍存在的外部编辑监听。
+
+```typescript
+invoke('list_remote_edit_sessions', { hostId: string })
+```
+
+**返回值：** `RemoteEditSessionInfo[]`。用于路径栏监听列表并直接重新打开系统编辑器。
+
+---
+
+### 6.5 stop_remote_edit
 
 停止所有编辑会话（断开连接时调用）。
 
 ```typescript
-invoke('stop_edit_sessions', {
-  hostId: string,
+invoke('stop_remote_edit', {
+  editSessionId: string,
 })
 ```
 
-**返回值：** `void`
+**返回值：** `boolean`。主机断开时后端会自动停止该主机的全部编辑会话。
 
 ---
 
@@ -965,7 +1016,7 @@ function useTauriEvent<T>(event: string, handler: (payload: T) => void) {
 | `transfer:error` | 后端→前端 | `{ sourceHostId, destHostId, code, message }` | 传输错误 |
 | `editor:synced` | 后端→前端 | `{ hostId, filePath, syncTime }` | 文件已同步回远程 |
 | `editor:error` | 后端→前端 | `{ hostId, filePath, code, message }` | 编辑同步错误 |
-| `editor:session_invalid` | 后端→前端 | `{ editSessionId }` | 编辑会话失效 |
+| `editor:session-invalid` | 后端→前端 | `{ editSessionId, hostId, filePath }` | 编辑会话失效 |
 | `settings:changed` | 后端→前端 | `AppSettings` | 配置文件变更 |
 
 ### 10.3 事件 Payload 类型定义

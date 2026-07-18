@@ -41,15 +41,13 @@ struct LegacySettings {
     language: Option<String>,
     #[serde(default)]
     default_download_path: Option<String>,
-    #[serde(default)]
-    config_version: Option<u32>,
 }
 
 /// 从 v1/v2（旧版 SY-FTP）迁移到 v3（SY-TFM）。
 ///
 /// 迁移规则：
 /// 1. 端口推断协议：22→SFTP, 21→FTP, 443→WebDAV, 其余→FTP
-/// 2. 密码保持原样（enc.v1: 前缀的已加密，明文留待首次 connect 时加密）
+/// 2. 密码先保留原值，`SettingsService::load` 会在落盘前统一加密明文
 /// 3. 字段映射：DefaultRemotePath 丢弃（SY-TFM 不持久化运行时路径）
 /// 4. config_version 设为 3
 pub fn migrate_v1_to_v3(old_path: &Path, _new_path: &Path) -> Result<AppSettings, AppError> {
@@ -80,6 +78,7 @@ pub fn migrate_v1_to_v3(old_path: &Path, _new_path: &Path) -> Result<AppSettings
             download_path: None,
             https: matches!(protocol, Protocol::WebDav),
             base_path: None,
+            sftp_host_key_fingerprint: None,
             is_connected: false,
         };
         hosts.push(host);
@@ -95,9 +94,7 @@ pub fn migrate_v1_to_v3(old_path: &Path, _new_path: &Path) -> Result<AppSettings
                 _ => crate::enums::Theme::System,
             })
             .unwrap_or_default(),
-        accent_color: legacy
-            .accent_color
-            .unwrap_or_else(|| "#2296F5".to_string()),
+        accent_color: legacy.accent_color.unwrap_or_else(|| "#2296F5".to_string()),
         language: legacy
             .language
             .as_deref()
@@ -106,12 +103,20 @@ pub fn migrate_v1_to_v3(old_path: &Path, _new_path: &Path) -> Result<AppSettings
                 _ => crate::enums::Language::En,
             })
             .unwrap_or_default(),
+        font_size: 13,
+        heading_font_size: 15,
+        label_font_size: 12,
+        caption_font_size: 11,
+        data_font_size: 12,
         default_download_path: legacy.default_download_path,
         default_data_path: None,
         hosts,
         window_topmost: false,
         background_image_path: None,
+        background_image_enabled: true,
         background_opacity: 0.3,
+        glass_blur: 22.0,
+        glass_opacity: 0.72,
         config_version: 3,
     };
 

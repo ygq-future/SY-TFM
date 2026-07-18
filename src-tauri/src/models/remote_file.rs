@@ -3,7 +3,7 @@ use ts_rs::TS;
 
 /// 远程文件/目录条目。
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../src/types/generated/")]
+#[ts(export, export_to = "../../src/types/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteFile {
     /// 文件名
@@ -11,6 +11,7 @@ pub struct RemoteFile {
     /// 完整路径
     pub full_path: String,
     /// 字节数（目录为 0）
+    #[ts(type = "number")]
     pub size: i64,
     /// 是否为目录
     pub is_directory: bool,

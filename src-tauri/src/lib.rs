@@ -1,3 +1,6 @@
+#![allow(unknown_lints)]
+#![allow(linker_messages)]
+
 //! SY-TFM — Tiny File Manager：Tauri 后端库。
 //!
 //! 模块组织遵循 AGENTS.md §7：
@@ -15,11 +18,12 @@ pub mod core;
 pub mod crypto;
 pub mod enums;
 pub mod error;
+mod local_fs;
 pub mod models;
 pub mod storage;
 pub mod transport;
 
-use core::SessionManager;
+use core::{EditSessionManager, SessionManager, TransferManager};
 
 /// 启动 Tauri 应用：组装命令并运行事件循环。
 ///
@@ -27,13 +31,18 @@ use core::SessionManager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let result = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(SessionManager::new())
+        .manage(TransferManager::new())
+        .manage(EditSessionManager::new())
         .invoke_handler(tauri::generate_handler![
             // 应用信息
             commands::get_app_info,
             commands::get_supported_protocols,
             // 连接管理
             commands::connect_host,
+            commands::test_host_connection,
             commands::disconnect_host,
             commands::get_connection_status,
             commands::get_connected_hosts,
@@ -46,9 +55,17 @@ pub fn run() {
             commands::get_working_directory,
             commands::navigate_to_path,
             commands::file_exists,
+            commands::read_remote_text,
+            commands::start_remote_edit,
+            commands::list_remote_edit_sessions,
+            commands::stop_remote_edit,
             // 文件操作
             commands::download_file,
             commands::upload_file,
+            commands::transfer_entry,
+            commands::begin_transfer,
+            commands::cancel_transfer,
+            commands::finish_transfer,
             commands::upload_content,
             commands::delete_file,
             commands::create_directory,
@@ -56,6 +73,12 @@ pub fn run() {
             // 设置
             commands::load_settings,
             commands::save_settings,
+            commands::export_settings_encrypted,
+            commands::import_settings_encrypted,
+            commands::get_storage_paths,
+            commands::load_background_image,
+            commands::get_font_size,
+            commands::set_font_size,
             commands::get_hosts,
             commands::save_host,
             commands::delete_host,

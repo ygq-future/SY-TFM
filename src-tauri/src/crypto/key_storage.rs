@@ -6,6 +6,7 @@
 //! 主密钥为 32 字节随机值，Base64 编码后存入 keyring。
 //! 首次调用时自动生成并存储。
 
+use aes_gcm::aead::{rand_core::RngCore, OsRng};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use keyring::Entry;
 
@@ -29,21 +30,7 @@ pub fn get_or_create_master_key() -> Result<[u8; KEY_LEN], AppError> {
         .map_err(|e| AppError::new(ErrorCode::PlatformUnsupported, e.to_string()))?;
 
     match entry.get_password() {
-        Ok(stored) => {
-            // 已有密钥：Base64 解码
-            let key_bytes = STANDARD
-                .decode(stored.as_bytes())
-                .map_err(|e| AppError::new(ErrorCode::CryptoDecryptFailed, e.to_string()))?;
-            if key_bytes.len() != KEY_LEN {
-                return Err(AppError::new(
-                    ErrorCode::CryptoDecryptFailed,
-                    format!("主密钥长度异常: {} != {KEY_LEN}", key_bytes.len()),
-                ));
-            }
-            let mut key = [0u8; KEY_LEN];
-            key.copy_from_slice(&key_bytes);
-            Ok(key)
-        }
+        Ok(stored) => decode_master_key(&stored),
         Err(keyring::Error::NoEntry) => {
             // 无密钥：生成新密钥并存入 keyring
             let key = generate_random_key();
@@ -51,7 +38,20 @@ pub fn get_or_create_master_key() -> Result<[u8; KEY_LEN], AppError> {
             entry
                 .set_password(&encoded)
                 .map_err(|e| AppError::new(ErrorCode::PlatformUnsupported, e.to_string()))?;
-            Ok(key)
+            let persisted = entry.get_password().map_err(|e| {
+                AppError::new(
+                    ErrorCode::PlatformUnsupported,
+                    format!("主密钥写入后无法读取: {e}"),
+                )
+            })?;
+            let persisted_key = decode_master_key(&persisted)?;
+            if persisted_key != key {
+                return Err(AppError::new(
+                    ErrorCode::CryptoEncryptFailed,
+                    "系统凭据存储未能稳定保存主密钥",
+                ));
+            }
+            Ok(persisted_key)
         }
         Err(e) => Err(AppError::new(
             ErrorCode::PlatformUnsupported,
@@ -60,23 +60,25 @@ pub fn get_or_create_master_key() -> Result<[u8; KEY_LEN], AppError> {
     }
 }
 
+/// 解码并校验平台凭据存储中的主密钥。
+fn decode_master_key(stored: &str) -> Result<[u8; KEY_LEN], AppError> {
+    let key_bytes = STANDARD
+        .decode(stored.as_bytes())
+        .map_err(|e| AppError::new(ErrorCode::CryptoDecryptFailed, e.to_string()))?;
+    if key_bytes.len() != KEY_LEN {
+        return Err(AppError::new(
+            ErrorCode::CryptoDecryptFailed,
+            format!("主密钥长度异常: {} != {KEY_LEN}", key_bytes.len()),
+        ));
+    }
+    let mut key = [0u8; KEY_LEN];
+    key.copy_from_slice(&key_bytes);
+    Ok(key)
+}
+
 /// 生成 32 字节随机密钥。
 fn generate_random_key() -> [u8; KEY_LEN] {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    // 简单 PRNG 基于系统时间种子（keyring 环境下无 OsRng 时的 fallback）
-    // 注：aes-gcm 的 OsRng 在实际使用时可用，此处保持无额外依赖
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos() as u64;
-    let mut state = seed;
     let mut key = [0u8; KEY_LEN];
-    for byte in key.iter_mut() {
-        // xorshift64
-        state ^= state << 13;
-        state ^= state >> 7;
-        state ^= state << 17;
-        *byte = (state & 0xFF) as u8;
-    }
+    OsRng.fill_bytes(&mut key);
     key
 }

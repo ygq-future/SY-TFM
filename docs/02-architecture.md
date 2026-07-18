@@ -71,7 +71,7 @@
 | 领域 | Crate | 版本 | 选型理由 |
 |------|-------|------|----------|
 | 异步运行时 | tokio | 1.47 | Rust 标准异步运行时 |
-| SSH/SFTP | russh | 0.54 | 纯 Rust SSH 实现，跨平台友好 |
+| SSH/SFTP | russh | 0.62.2 | 纯 Rust SSH 实现，跨平台友好（MSRV 1.85） |
 | HTTP/WebDAV | reqwest | 0.12 | HTTP 客户端，支持 WebDAV |
 | XML 解析 | quick-xml | 0.38 | WebDAV PROPFIND 响应解析 |
 | 加密 | aes-gcm | 0.10 | AES-256-GCM |
@@ -80,6 +80,7 @@
 | JSON | serde_json | 1.0 | JSON 支持 |
 | 类型导出 | ts-rs | 11 | Rust → TypeScript 类型自动生成 |
 | 文件监听 | notify | 8 | 跨平台文件监听 |
+| 文件锁 | fs2 | 0.4 | 跨实例保护 Remote Edit 活动临时目录 |
 | 日志 | tracing | 0.1 | 结构化日志 |
 | 应用错误 | anyhow | 1 | 应用错误处理 |
 | 库错误定义 | thiserror | 2 | 库错误定义 |
@@ -489,10 +490,17 @@ impl FileTransport for WebDavAdapter {
     }
 
     async fn is_connected(&self) -> bool {
-        self.client.is_some()
+        let url = self.build_url(&self.current_path);
+        tokio::time::timeout(health_probe_timeout(), self.propfind(&url))
+            .await
+            .is_ok_and(|result| result.is_ok())
     }
 }
 ```
+
+`is_connected()` 必须反映 adapter 的真实连接状态，而不是只判断客户端对象是否仍存在。
+SFTP 检查 russh 后台会话通道是否关闭；WebDAV 对当前目录执行带超时的 PROPFIND。
+SessionManager 以会话实例身份做条件清理，旧探测结果不得删除同一主机刚建立的新会话。
 
 ### 3.4 Adapter 能力声明
 

@@ -8,8 +8,16 @@ import type { SortColumn } from '../types/enums/SortColumn';
 import type { RemoteHost } from '../types/generated/RemoteHost';
 import type { RemoteFile } from '../types/generated/RemoteFile';
 import type { AppSettings } from '../types/generated/AppSettings';
+import type { StoragePaths } from '../types/generated/StoragePaths';
 import type { HostDto } from '../types/generated/HostDto';
 import type { ConnectionStatusPayload } from '../types/generated/ConnectionStatusPayload';
+import type { ProgressPayload } from '../types/generated/ProgressPayload';
+import type { BatchProgressPayload } from '../types/generated/BatchProgressPayload';
+import type { RemoteEditSessionInfo } from '../types/generated/RemoteEditSessionInfo';
+import type { EditorSyncedPayload } from '../types/generated/EditorSyncedPayload';
+import type { EditorErrorPayload } from '../types/generated/EditorErrorPayload';
+import type { EditorSessionInvalidPayload } from '../types/generated/EditorSessionInvalidPayload';
+import type { DownloadRequest } from '../types/generated/DownloadRequest';
 
 // ============================================================
 // 类型定义（对应后端 commands 层返回值）
@@ -19,6 +27,9 @@ import type { ConnectionStatusPayload } from '../types/generated/ConnectionStatu
 export interface AppInfo {
   name: string;
   version: string;
+  developer: string;
+  license: string;
+  githubUrl: string;
 }
 
 /** connect_host 返回值。 */
@@ -71,6 +82,11 @@ export interface NavigateResult {
 /** 连接远程主机。 */
 export async function connectHost(hostId: string, password?: string): Promise<ConnectResult> {
   return invoke<ConnectResult>('connect_host', { hostId, password });
+}
+
+/** 使用未保存的表单配置测试连接。 */
+export async function testHostConnection(host: RemoteHost, password?: string): Promise<void> {
+  await invoke('test_host_connection', { host, password });
 }
 
 /** 断开主机连接。 */
@@ -138,6 +154,30 @@ export async function fileExists(hostId: string, path: string): Promise<boolean>
   return invoke<boolean>('file_exists', { hostId, path });
 }
 
+/** 读取远程 UTF-8 文本，供内置在线编辑器使用。 */
+export async function readRemoteText(hostId: string, remotePath: string): Promise<string> {
+  return invoke<string>('read_remote_text', { hostId, remotePath });
+}
+
+/** 下载到受管临时目录并建立外部编辑器同步监听。 */
+export async function startRemoteEdit(
+  hostId: string,
+  remotePath: string,
+  fileName: string,
+): Promise<RemoteEditSessionInfo> {
+  return invoke<RemoteEditSessionInfo>('start_remote_edit', { hostId, remotePath, fileName });
+}
+
+/** 列出指定主机当前仍有效的外部编辑器监听。 */
+export async function listRemoteEditSessions(hostId: string): Promise<RemoteEditSessionInfo[]> {
+  return invoke<RemoteEditSessionInfo[]>('list_remote_edit_sessions', { hostId });
+}
+
+/** 停止外部编辑器同步监听并清理临时文件。 */
+export async function stopRemoteEdit(editSessionId: string): Promise<boolean> {
+  return invoke<boolean>('stop_remote_edit', { editSessionId });
+}
+
 // ============================================================
 // 文件操作命令
 // ============================================================
@@ -146,9 +186,56 @@ export async function fileExists(hostId: string, path: string): Promise<boolean>
 export async function downloadFile(
   hostId: string,
   remotePath: string,
-  localPath: string,
+  localDirectory: string,
+  localName: string,
+  isDirectory = false,
+  operationId: string,
 ): Promise<void> {
-  await invoke('download_file', { hostId, remotePath, localPath });
+  const request: DownloadRequest = {
+    hostId,
+    remotePath,
+    localDirectory,
+    localName,
+    isDirectory,
+    operationId,
+  };
+  await invoke('download_file', { request });
+}
+
+/** 注册一个可取消的传输任务。 */
+export async function beginTransfer(operationId: string, hostIds: string[]): Promise<void> {
+  await invoke('begin_transfer', { operationId, hostIds });
+}
+
+/** 请求取消指定传输任务。 */
+export async function cancelTransfer(operationId: string): Promise<boolean> {
+  return invoke<boolean>('cancel_transfer', { operationId });
+}
+
+/** 释放传输任务注册信息。 */
+export async function finishTransfer(operationId: string): Promise<void> {
+  await invoke('finish_transfer', { operationId });
+}
+
+/** 在两个已连接面板之间递归传输文件或目录。 */
+export async function transferEntry(
+  sourceHostId: string,
+  targetHostId: string,
+  sourcePath: string,
+  targetPath: string,
+  isDirectory: boolean,
+  operationId: string,
+): Promise<void> {
+  await invoke('transfer_entry', {
+    request: {
+      sourceHostId,
+      targetHostId,
+      sourcePath,
+      targetPath,
+      isDirectory,
+      operationId,
+    },
+  });
 }
 
 /** 上传文件。 */
@@ -156,8 +243,9 @@ export async function uploadFile(
   hostId: string,
   localPath: string,
   remotePath: string,
+  operationId: string,
 ): Promise<void> {
-  await invoke('upload_file', { hostId, localPath, remotePath });
+  await invoke('upload_file', { hostId, localPath, remotePath, operationId });
 }
 
 /** 上传内存内容（拖拽/新建文件用）。 */
@@ -165,12 +253,13 @@ export async function uploadContent(
   hostId: string,
   remotePath: string,
   content: Uint8Array | string,
+  operationId: string,
 ): Promise<void> {
   const payload =
     typeof content === 'string'
       ? Array.from(new TextEncoder().encode(content))
       : Array.from(content);
-  await invoke('upload_content', { hostId, remotePath, content: payload });
+  await invoke('upload_content', { hostId, remotePath, content: payload, operationId });
 }
 
 /** 删除文件/目录。 */
@@ -202,14 +291,44 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
   await invoke('save_settings', { settings });
 }
 
+/** 加密导出完整配置。 */
+export async function exportSettingsEncrypted(filePath: string): Promise<void> {
+  await invoke('export_settings_encrypted', { filePath });
+}
+
+/** 导入并解密完整配置。 */
+export async function importSettingsEncrypted(filePath: string): Promise<AppSettings> {
+  return invoke<AppSettings>('import_settings_encrypted', { filePath });
+}
+
+/** 获取当前平台解析后的默认下载和应用数据目录。 */
+export async function getStoragePaths(): Promise<StoragePaths> {
+  return invoke<StoragePaths>('get_storage_paths');
+}
+
+/** 将本地背景图片安全读取为 WebView 可用的 Data URL。 */
+export async function loadBackgroundImage(filePath: string): Promise<string> {
+  return invoke<string>('load_background_image', { filePath });
+}
+
+/** 获取持久化的界面基础字号。 */
+export async function getFontSize(): Promise<number> {
+  return invoke<number>('get_font_size');
+}
+
+/** 保存界面基础字号。 */
+export async function setFontSize(fontSize: number): Promise<void> {
+  await invoke('set_font_size', { fontSize });
+}
+
 /** 获取主机列表。 */
 export async function getHosts(): Promise<RemoteHost[]> {
   return invoke<RemoteHost[]>('get_hosts');
 }
 
 /** 保存主机（新增/更新）。 */
-export async function saveHost(host: RemoteHost): Promise<void> {
-  await invoke('save_host', { host });
+export async function saveHost(host: RemoteHost, clearPassword = false): Promise<void> {
+  await invoke('save_host', { host, clearPassword });
 }
 
 /** 删除主机。 */
@@ -238,6 +357,66 @@ export async function onConnectionStatus(
   return listen<ConnectionStatusPayload>('connection:status', (event) => {
     callback(event.payload);
   });
+}
+
+/** 监听下载进度。 */
+export async function onDownloadProgress(
+  callback: (payload: ProgressPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<ProgressPayload>('download:progress', (event) => callback(event.payload));
+}
+
+/** 监听下载完成。 */
+export async function onDownloadDone(
+  callback: (payload: ProgressPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<ProgressPayload>('download:done', (event) => callback(event.payload));
+}
+
+/** 监听目录下载中的文件计数进度。 */
+export async function onDownloadBatchProgress(
+  callback: (payload: BatchProgressPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<BatchProgressPayload>('download:batch-progress', (event) =>
+    callback(event.payload),
+  );
+}
+
+/** 监听上传进度。 */
+export async function onUploadProgress(
+  callback: (payload: ProgressPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<ProgressPayload>('upload:progress', (event) => callback(event.payload));
+}
+
+/** 监听上传完成。 */
+export async function onUploadDone(
+  callback: (payload: ProgressPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<ProgressPayload>('upload:done', (event) => callback(event.payload));
+}
+
+/** 监听外部编辑器文件同步成功。 */
+export async function onEditorSynced(
+  callback: (payload: EditorSyncedPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<EditorSyncedPayload>('editor:synced', (event) => callback(event.payload));
+}
+
+/** 监听外部编辑器文件同步失败。 */
+export async function onEditorError(
+  callback: (payload: EditorErrorPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<EditorErrorPayload>('editor:error', (event) => callback(event.payload));
+}
+
+/** 监听外部编辑会话失效。 */
+export async function onEditorSessionInvalid(
+  callback: (payload: EditorSessionInvalidPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<EditorSessionInvalidPayload>('editor:session-invalid', (event) =>
+    callback(event.payload),
+  );
 }
 
 // ============================================================

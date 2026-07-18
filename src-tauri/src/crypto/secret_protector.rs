@@ -72,7 +72,12 @@ impl SecretProtector {
         let nonce = Nonce::from_slice(nonce_bytes);
         let plaintext = cipher
             .decrypt(nonce, ciphertext)
-            .map_err(|e| AppError::new(ErrorCode::CryptoDecryptFailed, e.to_string()))?;
+            .map_err(|_| {
+                AppError::new(
+                    ErrorCode::CryptoDecryptFailed,
+                    "已保存的密码无法解密，系统密钥可能已变化或配置来自其他设备。请编辑该主机并重新输入密码。",
+                )
+            })?;
 
         String::from_utf8(plaintext)
             .map_err(|e| AppError::new(ErrorCode::CryptoDecryptFailed, e.to_string()))
@@ -107,6 +112,21 @@ mod tests {
 
         let result = protector.decrypt("not-a-valid-payload");
         assert!(result.is_err(), "无前缀的密文应解密失败");
+    }
+
+    #[test]
+    fn decrypt_with_changed_key_returns_actionable_message() {
+        let encrypted = SecretProtector::new([0x42u8; KEY_LEN])
+            .encrypt("saved-password")
+            .expect("加密应成功");
+
+        let error = SecretProtector::new([0x24u8; KEY_LEN])
+            .decrypt(&encrypted)
+            .expect_err("不同密钥必须解密失败");
+
+        assert_eq!(error.code, ErrorCode::CryptoDecryptFailed);
+        assert!(error.message.contains("重新输入密码"));
+        assert!(!error.message.contains("aead::Error"));
     }
 
     #[test]

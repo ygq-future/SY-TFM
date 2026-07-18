@@ -240,7 +240,7 @@ fn export_all_types() {
 | create_directory() | mkdir | MKCOL |
 | move_file() | rename | MOVE |
 | get_working_dir() | realpath | 当前记录 |
-| is_connected() | session check | client check |
+| is_connected() | russh channel closed check | timed PROPFIND probe |
 | capabilities() | OWNER_PERMISSIONS \| SYMLINKS \| ATOMIC_RENAME | NONE |
 
 ---
