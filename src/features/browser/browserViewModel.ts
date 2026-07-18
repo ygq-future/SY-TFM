@@ -4,6 +4,99 @@ import type { TransferDirection } from '../../types/enums/TransferDirection';
 /** 文件列表统一行高，虚拟定位和视觉布局必须共用此值。 */
 export const FILE_ROW_HEIGHT = 27;
 
+const EDITABLE_TEXT_EXTENSIONS = new Set([
+  'txt',
+  'md',
+  'markdown',
+  'json',
+  'jsonc',
+  'yaml',
+  'yml',
+  'toml',
+  'xml',
+  'csv',
+  'tsv',
+  'ini',
+  'conf',
+  'config',
+  'log',
+  'css',
+  'scss',
+  'sass',
+  'less',
+  'html',
+  'htm',
+  'js',
+  'jsx',
+  'ts',
+  'tsx',
+  'vue',
+  'svelte',
+  'py',
+  'rs',
+  'go',
+  'java',
+  'kt',
+  'kts',
+  'c',
+  'h',
+  'cpp',
+  'hpp',
+  'cs',
+  'php',
+  'rb',
+  'swift',
+  'sh',
+  'bash',
+  'zsh',
+  'fish',
+  'ps1',
+  'bat',
+  'cmd',
+  'sql',
+  'graphql',
+  'proto',
+  'dockerfile',
+]);
+
+const EDITABLE_TEXT_NAMES = new Set([
+  'dockerfile',
+  'makefile',
+  'jenkinsfile',
+  'procfile',
+  'readme',
+  'license',
+  'changelog',
+  'authors',
+  'notice',
+  '.gitignore',
+  '.gitattributes',
+  '.gitconfig',
+  '.editorconfig',
+  '.env',
+  '.npmrc',
+  '.bashrc',
+  '.zshrc',
+  '.profile',
+]);
+
+/** 判断文件是否适合进入文本编辑流程，避免读取视频等二进制内容。 */
+export function isEditableTextFile(filename: string): boolean {
+  const normalized = filename.split(/[\\/]/).pop()?.toLowerCase() ?? '';
+  if (EDITABLE_TEXT_NAMES.has(normalized)) return true;
+  const separator = normalized.lastIndexOf('.');
+  return separator >= 0 && EDITABLE_TEXT_EXTENSIONS.has(normalized.slice(separator + 1));
+}
+
+/** 将 WebDAV HTTP-date 与 SFTP 时间统一成紧凑的本地时间。 */
+export function formatRemoteModified(value: string): string {
+  if (!value.trim()) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 /**
  * 将单个文件或中转阶段的进度映射为整个任务的单调进度。
  * 100% 只由任务完成流程写入，避免子文件完成后进度再次归零。

@@ -9,6 +9,8 @@ import {
   getParentRemotePath,
   getContextMenuPosition,
   getFileContextActions,
+  formatRemoteModified,
+  isEditableTextFile,
   prependParentDirectory,
   normalizeRemotePath,
 } from './browserViewModel';
@@ -153,6 +155,16 @@ describe('browser view model', () => {
     expect(
       calculateTransferPercent(relayUpload, 1, 1, 100, 'remoteToRemote', 'upload'),
     ).toBeCloseTo(99.5);
+  });
+
+  it('formats WebDAV HTTP dates compactly and rejects binary editor targets', () => {
+    expect(formatRemoteModified('Sun, 12 Jul 2026 18:54:16 GMT')).toMatch(
+      /^2026-07-1[23] \d{2}:\d{2}$/,
+    );
+    expect(formatRemoteModified('')).toBe('-');
+    expect(isEditableTextFile('notes.md')).toBe(true);
+    expect(isEditableTextFile('Dockerfile')).toBe(true);
+    expect(isEditableTextFile('殭屍.2013.BDRip.mkv')).toBe(false);
   });
 
   it('measures the available breadcrumb width before collapsing', () => {

@@ -6,6 +6,7 @@
 //!
 //! 完整命令清单见 `docs/03-api-spec.md`。
 
+use std::collections::HashSet;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -1372,6 +1373,47 @@ pub fn save_host(host: RemoteHost, clear_password: Option<bool>) -> Result<(), A
     SettingsService::save(&settings)
 }
 
+fn reorder_hosts_in_memory(
+    hosts: &[RemoteHost],
+    host_ids: &[Uuid],
+) -> Result<Vec<RemoteHost>, AppError> {
+    let unique_ids = host_ids.iter().copied().collect::<HashSet<_>>();
+    if host_ids.len() != hosts.len() || unique_ids.len() != hosts.len() {
+        return Err(AppError::new(
+            crate::enums::ErrorCode::StorageWriteFailed,
+            "Host order must contain every saved host exactly once",
+        ));
+    }
+
+    host_ids
+        .iter()
+        .map(|id| {
+            hosts
+                .iter()
+                .find(|host| host.id == *id)
+                .cloned()
+                .ok_or_else(|| {
+                    AppError::new(
+                        crate::enums::ErrorCode::StorageWriteFailed,
+                        format!("Host order contains an unknown host: {id}"),
+                    )
+                })
+        })
+        .collect()
+}
+
+/// 按给定 ID 顺序原子保存主机列表；不改变任何主机字段或密码。
+#[tauri::command]
+pub fn reorder_hosts(host_ids: Vec<String>) -> Result<(), AppError> {
+    let host_ids = host_ids
+        .iter()
+        .map(|id| parse_uuid(id))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut settings = SettingsService::load()?;
+    settings.hosts = reorder_hosts_in_memory(&settings.hosts, &host_ids)?;
+    SettingsService::save(&settings)
+}
+
 #[cfg(test)]
 mod password_update_tests {
     use super::*;
@@ -1514,6 +1556,41 @@ mod password_update_tests {
             resolved.file_name().and_then(|value| value.to_str()),
             Some("SY-TFM")
         );
+    }
+
+    #[test]
+    fn host_reordering_preserves_complete_host_records() {
+        fn host(id: Uuid, name: &str, password: &str) -> RemoteHost {
+            RemoteHost {
+                id,
+                name: name.to_string(),
+                protocol: crate::enums::Protocol::Sftp,
+                host: format!("{name}.example.com"),
+                port: 22,
+                username: "user".to_string(),
+                password: password.to_string(),
+                tags: String::new(),
+                download_path: None,
+                https: true,
+                base_path: None,
+                sftp_host_key_fingerprint: None,
+                is_connected: false,
+            }
+        }
+
+        let first_id = Uuid::from_u128(1);
+        let second_id = Uuid::from_u128(2);
+        let hosts = vec![
+            host(first_id, "first", "enc.v1:first"),
+            host(second_id, "second", "enc.v1:second"),
+        ];
+        let reordered = reorder_hosts_in_memory(&hosts, &[second_id, first_id])
+            .expect("valid host order should be accepted");
+
+        assert_eq!(reordered[0].id, second_id);
+        assert_eq!(reordered[0].password, "enc.v1:second");
+        assert!(reorder_hosts_in_memory(&hosts, &[first_id]).is_err());
+        assert!(reorder_hosts_in_memory(&hosts, &[first_id, first_id]).is_err());
     }
 }
 

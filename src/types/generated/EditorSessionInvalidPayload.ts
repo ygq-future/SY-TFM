@@ -3,17 +3,16 @@
 /**
  * 外部编辑会话失效事件。
  */
-export type EditorSessionInvalidPayload = {
-  /**
-   * 编辑会话 ID。
-   */
-  editSessionId: string;
-  /**
-   * 主机 ID。
-   */
-  hostId: string;
-  /**
-   * 远程路径。
-   */
-  filePath: string;
-};
+export type EditorSessionInvalidPayload = { 
+/**
+ * 编辑会话 ID。
+ */
+editSessionId: string, 
+/**
+ * 主机 ID。
+ */
+hostId: string, 
+/**
+ * 远程路径。
+ */
+filePath: string, };

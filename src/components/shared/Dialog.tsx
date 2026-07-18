@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, PenLine, X } from 'lucide-react';
+import { AlertCircle, AlertTriangle, PenLine, X } from 'lucide-react';
 import { ModalPortal } from './ModalPortal';
 
 /** 确认对话框。 */
@@ -54,6 +54,52 @@ export function ConfirmDialog({
               onClick={onConfirm}
             >
               {confirmLabel ?? t('common.confirm')}
+            </button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+/** 单操作提示对话框。 */
+export function AlertDialog({
+  title,
+  message,
+  closeLabel,
+  onClose,
+}: {
+  title: string;
+  message: React.ReactNode;
+  closeLabel?: string;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <ModalPortal>
+      <div className="modal-backdrop">
+        <div className="modal-panel compact-modal" role="alertdialog" aria-modal="true">
+          <div className="modal-header">
+            <div>
+              <p className="modal-eyebrow">{t('common.notice')}</p>
+              <h3>{title}</h3>
+            </div>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={onClose}
+              aria-label={t('common.close')}
+            >
+              <X />
+            </button>
+          </div>
+          <div className="dialog-message dialog-message--notice">
+            <AlertCircle />
+            {typeof message === 'string' ? <p>{message}</p> : message}
+          </div>
+          <div className="modal-actions">
+            <button className="primary-button" type="button" onClick={onClose}>
+              {closeLabel ?? t('common.close')}
             </button>
           </div>
         </div>

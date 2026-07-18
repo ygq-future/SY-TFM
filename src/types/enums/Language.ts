@@ -3,4 +3,4 @@
 /**
  * 界面语言。
  */
-export type Language = 'en' | 'zh';
+export type Language = "en" | "zh";

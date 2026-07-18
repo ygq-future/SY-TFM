@@ -45,7 +45,7 @@ export function HostContextMenu({
   }, [onClose]);
 
   const adjustedX = Math.max(8, Math.min(x, window.innerWidth - 190));
-  const adjustedY = Math.max(8, Math.min(y, window.innerHeight - 160));
+  const adjustedY = Math.max(8, Math.min(y, window.innerHeight - 180));
   const run = (action: () => void) => {
     action();
     onClose();

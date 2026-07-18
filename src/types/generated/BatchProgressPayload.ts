@@ -3,29 +3,28 @@
 /**
  * 批量传输进度事件数据。
  */
-export type BatchProgressPayload = {
-  /**
-   * 主机 ID
-   */
-  hostId: string;
-  /**
-   * 操作 ID
-   */
-  operationId: string;
-  /**
-   * 当前索引
-   */
-  currentIndex: number;
-  /**
-   * 总数
-   */
-  totalCount: number;
-  /**
-   * 当前文件名
-   */
-  currentFile: string;
-  /**
-   * 当前文件进度百分比
-   */
-  filePercent: number;
-};
+export type BatchProgressPayload = { 
+/**
+ * 主机 ID
+ */
+hostId: string, 
+/**
+ * 操作 ID
+ */
+operationId: string, 
+/**
+ * 当前索引
+ */
+currentIndex: number, 
+/**
+ * 总数
+ */
+totalCount: number, 
+/**
+ * 当前文件名
+ */
+currentFile: string, 
+/**
+ * 当前文件进度百分比
+ */
+filePercent: number, };

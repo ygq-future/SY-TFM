@@ -52,6 +52,19 @@ describe('remote editor integration', () => {
     expect(styles).toContain('.transfer-task > svg');
   });
 
+  it('blocks unsupported binary files before either edit transport is invoked', () => {
+    const appSource = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
+    expect(appSource).toContain('isEditableTextFile(file.name)');
+    expect(appSource).toContain('setUnsupportedEditFile(file)');
+    expect(appSource).toContain('<AlertDialog');
+    expect(appSource.indexOf('isEditableTextFile(file.name)')).toBeLessThan(
+      appSource.indexOf('readRemoteText(hostId, file.fullPath)'),
+    );
+    expect(appSource.indexOf('isEditableTextFile(file.name)')).toBeLessThan(
+      appSource.indexOf('startRemoteEdit(hostId, file.fullPath, file.name)'),
+    );
+  });
+
   it('reuses active remote edit watchers and exposes them from the path toolbar', () => {
     const commands = readFileSync(
       new URL('../../../src-tauri/src/commands/mod.rs', import.meta.url),

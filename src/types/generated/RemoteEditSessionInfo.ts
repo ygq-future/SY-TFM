@@ -3,21 +3,20 @@
 /**
  * 外部编辑会话启动结果。
  */
-export type RemoteEditSessionInfo = {
-  /**
-   * 编辑会话 ID。
-   */
-  editSessionId: string;
-  /**
-   * 交给系统默认编辑器打开的本地临时文件。
-   */
-  localPath: string;
-  /**
-   * 源文件名。
-   */
-  fileName: string;
-  /**
-   * 远程文件的完整路径。
-   */
-  remotePath: string;
-};
+export type RemoteEditSessionInfo = { 
+/**
+ * 编辑会话 ID。
+ */
+editSessionId: string, 
+/**
+ * 交给系统默认编辑器打开的本地临时文件。
+ */
+localPath: string, 
+/**
+ * 源文件名。
+ */
+fileName: string, 
+/**
+ * 远程文件的完整路径。
+ */
+remotePath: string, };

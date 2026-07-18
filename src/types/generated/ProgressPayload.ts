@@ -3,33 +3,32 @@
 /**
  * 单文件传输进度事件数据。
  */
-export type ProgressPayload = {
-  /**
-   * 主机 ID
-   */
-  hostId: string;
-  /**
-   * 操作 ID
-   */
-  operationId: string;
-  /**
-   * 已传输字节数
-   */
-  transferred: number;
-  /**
-   * 总字节数
-   */
-  total: number;
-  /**
-   * 进度百分比
-   */
-  percent: number;
-  /**
-   * 传输速度（字节/秒）
-   */
-  speed: number;
-  /**
-   * 当前文件名
-   */
-  currentFile: string;
-};
+export type ProgressPayload = { 
+/**
+ * 主机 ID
+ */
+hostId: string, 
+/**
+ * 操作 ID
+ */
+operationId: string, 
+/**
+ * 已传输字节数
+ */
+transferred: number, 
+/**
+ * 总字节数
+ */
+total: number, 
+/**
+ * 进度百分比
+ */
+percent: number, 
+/**
+ * 传输速度（字节/秒）
+ */
+speed: number, 
+/**
+ * 当前文件名
+ */
+currentFile: string, };

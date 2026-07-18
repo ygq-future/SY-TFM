@@ -73,13 +73,14 @@ import { UploadZone } from './features/browser/UploadZone';
 import { ContextMenu } from './features/browser/ContextMenu';
 import { PaneHostSelect } from './features/browser/PaneHostSelect';
 import { RemoteEditSessionsMenu } from './features/editor/RemoteEditSessionsMenu';
-import { ConfirmDialog, InputDialog } from './components/shared/Dialog';
+import { AlertDialog, ConfirmDialog, InputDialog } from './components/shared/Dialog';
 import { ToastProvider } from './components/shared/ToastProvider';
 import { AppTitleBar } from './components/layout/AppTitleBar';
 import { formatAppError } from './lib/errors';
 import { pickDirectory } from './lib/dialog';
 import {
   calculateTransferPercent,
+  isEditableTextFile,
   joinRemotePath,
   normalizeRemotePath,
 } from './features/browser/browserViewModel';
@@ -115,6 +116,7 @@ function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: Browse
   const [remoteEditRevision, setRemoteEditRevision] = useState(0);
   const pane = useBrowserStore((state) => state.panes[paneIndex]);
   const {
+    activePane,
     initializeDirectory,
     navigateToPath,
     refresh,
@@ -144,6 +146,7 @@ function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: Browse
     file: RemoteFile;
     content: string;
   } | null>(null);
+  const [unsupportedEditFile, setUnsupportedEditFile] = useState<RemoteFile | null>(null);
   const [dialog, setDialog] = useState<
     | { type: 'mkdir' }
     | { type: 'createFile' }
@@ -159,6 +162,34 @@ function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: Browse
   useEffect(() => {
     void initializeDirectory(paneIndex, hostId);
   }, [hostId, initializeDirectory, paneIndex]);
+
+  useEffect(() => {
+    const handleFileShortcut = (event: KeyboardEvent) => {
+      if (activePane !== paneIndex || event.ctrlKey || event.altKey || event.metaKey) return;
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(
+          'input, textarea, [contenteditable="true"], [role="textbox"], [role="dialog"], [role="alertdialog"], [role="menu"], .cm-editor',
+        )
+      ) {
+        return;
+      }
+      const selectedFiles = pane.selectedFiles.filter((file) => file.name !== '..');
+      if (event.key === 'Delete' && selectedFiles.length > 0) {
+        event.preventDefault();
+        setContextMenu(null);
+        selectFiles(paneIndex, selectedFiles);
+        setDialog({ type: 'deleteConfirm' });
+      } else if (event.key === 'F2' && selectedFiles.length === 1) {
+        event.preventDefault();
+        setContextMenu(null);
+        setDialog({ type: 'rename', file: selectedFiles[0] });
+      }
+    };
+    window.addEventListener('keydown', handleFileShortcut);
+    return () => window.removeEventListener('keydown', handleFileShortcut);
+  }, [activePane, pane.selectedFiles, paneIndex, selectFiles]);
 
   const handleOpen = useCallback(
     (file: RemoteFile) => {
@@ -200,6 +231,10 @@ function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: Browse
 
   const handleOnlineEdit = useCallback(
     async (file: RemoteFile) => {
+      if (!isEditableTextFile(file.name)) {
+        setUnsupportedEditFile(file);
+        return;
+      }
       setOperationMessage(t('editor.opening', { name: file.name }));
       try {
         const content = await readRemoteText(hostId, file.fullPath);
@@ -217,6 +252,10 @@ function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: Browse
 
   const handleRemoteEdit = useCallback(
     async (file: RemoteFile) => {
+      if (!isEditableTextFile(file.name)) {
+        setUnsupportedEditFile(file);
+        return;
+      }
       setOperationMessage(t('editor.opening', { name: file.name }));
       try {
         const remoteSession = await startRemoteEdit(hostId, file.fullPath, file.name);
@@ -690,6 +729,13 @@ function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: Browse
           onCancel={() => setDialog(null)}
         />
       )}
+      {unsupportedEditFile && (
+        <AlertDialog
+          title={t('editor.unsupportedTitle')}
+          message={t('editor.unsupportedMessage', { name: unsupportedEditFile.name })}
+          onClose={() => setUnsupportedEditFile(null)}
+        />
+      )}
     </div>
   );
 }
@@ -907,6 +953,7 @@ function AppInner() {
     refresh,
     updateTransfer,
     setOperationMessage,
+    clearOperationMessage,
     moveFiles,
     transferFiles,
   } = useBrowserStore();
@@ -923,6 +970,30 @@ function AppInner() {
       };
       return rank(right.id) - rank(left.id);
     });
+  }, []);
+
+  useEffect(() => {
+    const handleSelectAll = (event: KeyboardEvent) => {
+      if ((!event.ctrlKey && !event.metaKey) || event.key.toLowerCase() !== 'a') return;
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(
+          'input, textarea, [contenteditable="true"], [role="textbox"], [role="dialog"], [role="alertdialog"], .cm-editor',
+        )
+      ) {
+        return;
+      }
+      event.preventDefault();
+      window.getSelection()?.removeAllRanges();
+      const state = useBrowserStore.getState();
+      state.selectFiles(
+        state.activePane,
+        state.panes[state.activePane].files.filter((file) => file.name !== '..'),
+      );
+    };
+    window.addEventListener('keydown', handleSelectAll);
+    return () => window.removeEventListener('keydown', handleSelectAll);
   }, []);
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
@@ -1132,6 +1203,7 @@ function AppInner() {
     let unlisten: (() => void) | undefined;
     void onConnectionStatus((payload) => {
       if (!active) return;
+      clearOperationMessage();
       setConnectionStatus(payload.hostId, payload.status);
       if (payload.status === 'reconnecting') {
         void reconnectHost(payload.hostId).catch(() => undefined);
@@ -1146,7 +1218,7 @@ function AppInner() {
       active = false;
       unlisten?.();
     };
-  }, [reconnectHost, setConnectionStatus]);
+  }, [clearOperationMessage, reconnectHost, setConnectionStatus]);
 
   useEffect(() => {
     let active = true;
@@ -1169,8 +1241,12 @@ function AppInner() {
             true,
           );
         }),
-        onEditorSessionInvalid(() => {
-          if (active) setOperationMessage(t('editor.sessionInvalid'), true);
+        onEditorSessionInvalid((payload) => {
+          if (!active) return;
+          const status = useConnectionStore.getState().connectionStatus[payload.hostId];
+          if (status === 'connecting' || status === 'reconnecting' || status === 'connected')
+            return;
+          setOperationMessage(t('editor.sessionInvalid'));
         }),
       ]);
       if (active) disposers.push(...listeners);

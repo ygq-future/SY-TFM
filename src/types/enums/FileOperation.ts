@@ -3,12 +3,4 @@
 /**
  * 文件操作类型。
  */
-export type FileOperation =
-  | 'download'
-  | 'upload'
-  | 'delete'
-  | 'move'
-  | 'rename'
-  | 'createDirectory'
-  | 'createFile'
-  | 'transfer';
+export type FileOperation = "download" | "upload" | "delete" | "move" | "rename" | "createDirectory" | "createFile" | "transfer";

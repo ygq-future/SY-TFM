@@ -3,26 +3,4 @@
 /**
  * 统一错误码（驱动前端错误处理）。
  */
-export type ErrorCode =
-  | 'connection_failed'
-  | 'auth_failed'
-  | 'not_connected'
-  | 'connection_timeout'
-  | 'host_unreachable'
-  | 'host_key_unknown'
-  | 'host_key_changed'
-  | 'file_not_found'
-  | 'permission_denied'
-  | 'file_already_exists'
-  | 'directory_not_empty'
-  | 'protocol_error'
-  | 'unsupported_operation'
-  | 'storage_read_failed'
-  | 'storage_write_failed'
-  | 'crypto_decrypt_failed'
-  | 'crypto_encrypt_failed'
-  | 'session_not_found'
-  | 'session_expired'
-  | 'operation_cancelled'
-  | 'operation_timeout'
-  | 'platform_unsupported';
+export type ErrorCode = "connection_failed" | "auth_failed" | "not_connected" | "connection_timeout" | "host_unreachable" | "host_key_unknown" | "host_key_changed" | "file_not_found" | "permission_denied" | "file_already_exists" | "directory_not_empty" | "protocol_error" | "unsupported_operation" | "storage_read_failed" | "storage_write_failed" | "crypto_decrypt_failed" | "crypto_encrypt_failed" | "session_not_found" | "session_expired" | "operation_cancelled" | "operation_timeout" | "platform_unsupported";

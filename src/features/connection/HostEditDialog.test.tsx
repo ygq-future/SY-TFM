@@ -6,6 +6,10 @@ import { useConnectionStore } from '../../stores/connectionStore';
 import { HostEditDialog, normalizeHostForm, updateHostForm } from './HostEditDialog';
 import type { RemoteHost } from '../../types/generated/RemoteHost';
 
+vi.mock('../../lib/dialog', () => ({
+  pickDirectory: vi.fn(),
+}));
+
 describe('HostEditDialog', () => {
   beforeAll(async () => {
     await i18n.changeLanguage('zh');
@@ -80,6 +84,12 @@ describe('HostEditDialog', () => {
     expect(source).not.toContain('<label htmlFor="host-protocol"');
     expect(source).toContain('className="field-label protocol-picker-label"');
     expect(css).toMatch(/\.protocol-picker-label\s*\{[^}]*font-size:\s*var\(--type-label-size\)/s);
+  });
+
+  it('maps the connection subtitle to the adjustable hints and captions tier', () => {
+    const css = readFileSync(new URL('../../index.css', import.meta.url), 'utf8');
+    const rules = [...css.matchAll(/\.host-editor-intro > div > p:last-child\s*\{([^}]*)\}/g)];
+    expect(rules.at(-1)?.[1]).toContain('font-size: var(--type-caption-size)');
   });
 
   it('keeps the saved-password status and action on one compact line', () => {

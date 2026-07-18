@@ -13,6 +13,7 @@
     "remove": "Remove",
     "browse": "Browse",
     "unknownError": "Unknown error",
+    "notice": "NOTICE",
     "confirmation": "CONFIRMATION",
     "quickAction": "QUICK ACTION"
   },
@@ -199,6 +200,8 @@
     "newFile": "New file"
   },
   "editor": {
+    "unsupportedTitle": "Unsupported edit type",
+    "unsupportedMessage": "{{name}} is not a supported text file and cannot be opened in an editor.",
     "plainText": "Plain text",
     "save": "Save",
     "saving": "Syncing…",

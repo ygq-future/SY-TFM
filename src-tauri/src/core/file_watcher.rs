@@ -339,8 +339,63 @@ fn session_local_path(
     id: Uuid,
 ) -> Result<(PathBuf, PathBuf), AppError> {
     let session_directory = safe_local_child(root, &id.simple().to_string())?;
-    let local_path = safe_local_child(&session_directory, file_name)?;
+    let temporary_file_name = session_temp_file_name(file_name, id);
+    let local_path = safe_local_child(&session_directory, &temporary_file_name)?;
     Ok((session_directory, local_path))
+}
+
+fn session_temp_file_name(file_name: &str, id: Uuid) -> String {
+    let path = Path::new(file_name);
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(file_name);
+    let extension = path.extension().and_then(|value| value.to_str());
+    let suffix_length = EditPolicy::RemoteEditSuffixHexCharacters.value() as usize;
+    let suffix = id
+        .simple()
+        .to_string()
+        .chars()
+        .rev()
+        .take(suffix_length)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    let marker = format!("_{suffix}");
+    let maximum_units = EditPolicy::MaxLocalFileNameUtf16Units.value() as usize;
+    let marker_units = marker.encode_utf16().count();
+
+    let extension_budget = maximum_units.saturating_sub(marker_units + 1);
+    let extension = extension
+        .map(|value| truncate_utf16(value, extension_budget))
+        .filter(|value| !value.is_empty());
+    let extension_units = extension
+        .as_ref()
+        .map(|value| value.encode_utf16().count() + 1)
+        .unwrap_or_default();
+    let stem_budget = maximum_units.saturating_sub(marker_units + extension_units);
+    let stem = truncate_utf16(stem, stem_budget);
+
+    match extension {
+        Some(extension) => format!("{stem}{marker}.{extension}"),
+        None => format!("{stem}{marker}"),
+    }
+}
+
+fn truncate_utf16(value: &str, maximum_units: usize) -> String {
+    let mut used_units = 0;
+    value
+        .chars()
+        .take_while(|character| {
+            let character_units = character.len_utf16();
+            if used_units + character_units > maximum_units {
+                return false;
+            }
+            used_units += character_units;
+            true
+        })
+        .collect()
 }
 
 fn emit_editor_error(
@@ -367,7 +422,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn session_path_preserves_a_maximum_length_unicode_file_name() {
+    fn session_path_adds_a_visible_session_suffix_within_the_windows_limit() {
         let id = Uuid::from_u128(1);
         let file_name = format!("{}😀.txt", "中".repeat(249));
         assert_eq!(file_name.encode_utf16().count(), 255);
@@ -376,10 +431,12 @@ mod tests {
             .expect("maximum valid file name should remain valid");
 
         assert_eq!(session_directory, root.join(id.simple().to_string()));
-        assert_eq!(
-            local_path.file_name().and_then(|name| name.to_str()),
-            Some(file_name.as_str())
-        );
+        let local_file_name = local_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("UTF-8 local file name");
+        assert_ne!(local_file_name, file_name);
+        assert!(local_file_name.ends_with("_00000001.txt"));
         assert_eq!(
             local_path
                 .file_name()
@@ -389,6 +446,25 @@ mod tests {
                 .count(),
             255
         );
+    }
+
+    #[test]
+    fn same_named_remote_files_receive_distinct_visible_temp_names() {
+        let root = std::env::temp_dir().join("sy-tfm-edit-test");
+        let (_, first) =
+            session_local_path(&root, "README.md", Uuid::from_u128(1)).expect("first session path");
+        let (_, second) = session_local_path(&root, "README.md", Uuid::from_u128(2))
+            .expect("second session path");
+
+        assert_eq!(
+            first.file_name().and_then(|name| name.to_str()),
+            Some("README_00000001.md")
+        );
+        assert_eq!(
+            second.file_name().and_then(|name| name.to_str()),
+            Some("README_00000002.md")
+        );
+        assert_ne!(first, second);
     }
 
     #[test]

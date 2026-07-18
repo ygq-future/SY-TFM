@@ -21,6 +21,7 @@ pub mod sort_order;
 pub mod theme;
 pub mod transfer_direction;
 pub(crate) mod transfer_policy;
+pub(crate) mod webdav_depth;
 
 pub use adapter_capability::AdapterCapability;
 pub use connection_status::ConnectionStatus;

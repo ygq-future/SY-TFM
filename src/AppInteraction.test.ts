@@ -89,6 +89,25 @@ describe('app shell interaction wiring', () => {
     expect(source).toContain("status === 'connecting' || status === 'reconnecting'");
   });
 
+  it('clears stale operation notices when a newer connection lifecycle starts', () => {
+    const browserStore = readFileSync(new URL('./stores/browserStore.ts', import.meta.url), 'utf8');
+    expect(browserStore).toContain('clearOperationMessage');
+    expect(source).toMatch(/onConnectionStatus\([\s\S]*?clearOperationMessage\(\)/);
+    expect(source).toContain("status === 'connecting' || status === 'reconnecting'");
+  });
+
+  it('maps Ctrl+A to active-pane file selection instead of browser text selection', () => {
+    expect(source).toContain("event.key.toLowerCase() !== 'a'");
+    expect(source).toContain('event.preventDefault()');
+    expect(source).toContain('window.getSelection()?.removeAllRanges()');
+    expect(source).toContain("file.name !== '..'");
+    expect(css).toMatch(/body\s*\{[^}]*user-select:\s*none/s);
+    expect(css).toMatch(
+      /input,[\s\S]*?textarea,[\s\S]*?\[contenteditable='true'\][^{]*\{[^}]*user-select:\s*text/s,
+    );
+    expect(css).toMatch(/\.global-status-bar[^{]*\{[^}]*user-select:\s*text/s);
+  });
+
   it('animates the pane host menu and both directions of host sidebar visibility', () => {
     expect(css).toMatch(/\.pane-host-menu,[\s\S]*?animation:\s*glass-rise/);
     expect(css).toMatch(/\.glass-workspace\s*\{[^}]*transition:/s);
@@ -108,5 +127,19 @@ describe('app shell interaction wiring', () => {
     const browserStore = readFileSync(new URL('./stores/browserStore.ts', import.meta.url), 'utf8');
     expect(browserStore).toContain('isCancelled: boolean');
     expect(source).toContain('!transfer.isCancelled');
+  });
+
+  it('centers a single transfer task in the complete status bar', () => {
+    expect(css).toMatch(
+      /\.transfer-status > \.transfer-task:only-child\s*\{[^}]*margin-inline:\s*auto/s,
+    );
+  });
+
+  it('maps desktop file shortcuts without stealing keys from editable surfaces', () => {
+    expect(source).toContain("event.key === 'Delete'");
+    expect(source).toContain("event.key === 'F2'");
+    expect(source).toContain("setDialog({ type: 'deleteConfirm' })");
+    expect(source).toContain("setDialog({ type: 'rename', file: selectedFiles[0] })");
+    expect(source).toContain('[role="menu"]');
   });
 });

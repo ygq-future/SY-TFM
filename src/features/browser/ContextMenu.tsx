@@ -127,14 +127,19 @@ export function ContextMenu({
 
 const menuPresentation: Record<
   FileContextAction,
-  { icon: React.ComponentType<{ className?: string }>; labelKey: string; danger?: boolean }
+  {
+    icon: React.ComponentType<{ className?: string }>;
+    labelKey: string;
+    danger?: boolean;
+    shortcut?: string;
+  }
 > = {
   download: { icon: Download, labelKey: 'contextMenu.download' },
   downloadTo: { icon: FileDown, labelKey: 'contextMenu.downloadTo' },
   remoteEdit: { icon: FilePenLine, labelKey: 'contextMenu.remoteEdit' },
   onlineEdit: { icon: Code2, labelKey: 'contextMenu.onlineEdit' },
-  rename: { icon: Pencil, labelKey: 'contextMenu.rename' },
-  delete: { icon: Trash2, labelKey: 'contextMenu.delete', danger: true },
+  rename: { icon: Pencil, labelKey: 'contextMenu.rename', shortcut: 'F2' },
+  delete: { icon: Trash2, labelKey: 'contextMenu.delete', danger: true, shortcut: 'Del' },
   refresh: { icon: RefreshCw, labelKey: 'contextMenu.refresh' },
   mkdir: { icon: FolderPlus, labelKey: 'contextMenu.newFolder' },
   createFile: { icon: FilePlus, labelKey: 'contextMenu.newFile' },
@@ -157,6 +162,7 @@ function MenuAction({
       <MenuItem
         icon={item.icon}
         label={t(item.labelKey)}
+        hint={item.shortcut}
         danger={item.danger}
         onClick={() => onRun(action)}
       />

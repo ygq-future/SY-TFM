@@ -81,6 +81,7 @@ pub fn run() {
             commands::set_font_size,
             commands::get_hosts,
             commands::save_host,
+            commands::reorder_hosts,
             commands::delete_host,
             commands::export_hosts,
             commands::import_hosts,

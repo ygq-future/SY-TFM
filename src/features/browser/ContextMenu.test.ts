@@ -16,4 +16,11 @@ describe('file context menu positioning', () => {
     expect(source).toContain('onOnlineEdit');
     expect(source).not.toContain('onUnavailable');
   });
+
+  it('exposes native desktop shortcut hints for rename and delete', () => {
+    const source = readFileSync(new URL('./ContextMenu.tsx', import.meta.url), 'utf8');
+    expect(source).toContain("shortcut: 'F2'");
+    expect(source).toContain("shortcut: 'Del'");
+    expect(source).toContain('hint={item.shortcut}');
+  });
 });

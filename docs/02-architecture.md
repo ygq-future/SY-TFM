@@ -111,7 +111,10 @@
 | 图标 | lucide-react | 0.54x | Tree Shake |
 | 编辑器 | @uiw/react-codemirror | 4.24 | 文本编辑 |
 | 虚拟列表 | @tanstack/react-virtual | 3.13 | 大文件列表 |
-| 拖拽 | @dnd-kit/core | 6.3 | 文件拖拽 |
+| 拖拽基础 | @dnd-kit/core | 6.3 | 文件与主机拖拽 |
+| 列表排序 | @dnd-kit/sortable | 10.0 | 主机列表实时让位排序 |
+| 拖拽约束 | @dnd-kit/modifiers | 9.0 | 主机排序锁定垂直轴 |
+| 拖拽变换 | @dnd-kit/utilities | 3.2 | 安全生成实时位移 transform |
 | Toast | sonner | 2.0 | 消息通知 |
 | 表单 | react-hook-form | 7.62 | 表单管理 |
 | 数据校验 | zod | 4.1 | Schema 校验 |
@@ -268,8 +271,13 @@ pub fn create_adapter(protocol: Protocol) -> Box<dyn FileTransport> {
         // Protocol::S3 => Box::new(S3Adapter::new()),
         _ => panic!("Unsupported protocol: {:?}", protocol),
     }
-}
+    }
 ```
+
+所有 `PROPFIND` 必须显式发送有限 `Depth`：目录列表使用 `1`，连接验证、切换目录验证与
+健康探测使用 `0`，禁止依赖 RFC 4918 的缺省 `infinity`。Multistatus 中的 `href` 是服务端
+URL 路径，adapter 必须先移除 WebDAV 服务根路径（例如 `/dav`），转换为应用逻辑路径，
+并仅保留当前目录的直属子项；上层不得接触或重复拼接服务根路径。
 
 ### 3.3 Adapter 实现示例
 
@@ -499,7 +507,7 @@ impl FileTransport for WebDavAdapter {
 ```
 
 `is_connected()` 必须反映 adapter 的真实连接状态，而不是只判断客户端对象是否仍存在。
-SFTP 检查 russh 后台会话通道是否关闭；WebDAV 对当前目录执行带超时的 PROPFIND。
+SFTP 检查 russh 后台会话通道是否关闭；WebDAV 对当前目录执行带超时且 `Depth: 0` 的 PROPFIND。
 SessionManager 以会话实例身份做条件清理，旧探测结果不得删除同一主机刚建立的新会话。
 
 ### 3.4 Adapter 能力声明

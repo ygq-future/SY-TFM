@@ -142,4 +142,14 @@ describe('browser store pane ownership', () => {
     cancellation.resolve(true);
     await request;
   });
+
+  it('clears both stale operation text and its error styling', () => {
+    useBrowserStore
+      .getState()
+      .setOperationMessage('The edit session ended because its host disconnected', true);
+    useBrowserStore.getState().clearOperationMessage();
+
+    expect(useBrowserStore.getState().operationMessage).toBe('');
+    expect(useBrowserStore.getState().operationIsError).toBe(false);
+  });
 });

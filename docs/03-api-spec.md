@@ -837,7 +837,22 @@ invoke('save_host', {
 
 ---
 
-### 8.3 delete_host
+### 8.3 reorder_hosts
+
+按给定 ID 顺序原子持久化全部主机。数组必须包含当前保存的每个主机且恰好一次；命令只改变顺序，
+不会接受或重写主机密码等配置字段。
+
+```typescript
+invoke('reorder_hosts', {
+  hostIds: string[],
+})
+```
+
+**返回值：** `void`
+
+---
+
+### 8.4 delete_host
 
 删除主机。
 
@@ -851,7 +866,7 @@ invoke('delete_host', {
 
 ---
 
-### 8.4 clone_host
+### 8.5 clone_host
 
 克隆主机配置。
 
@@ -866,7 +881,7 @@ invoke('clone_host', {
 
 ---
 
-### 8.5 get_supported_protocols
+### 8.6 get_supported_protocols
 
 获取当前应用支持的协议列表（用于主机编辑界面动态渲染协议选项）。
 

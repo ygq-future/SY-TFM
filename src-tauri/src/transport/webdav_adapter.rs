@@ -16,6 +16,7 @@ mod impl_ {
 
     use crate::enums::connection_policy::ConnectionPolicy;
     use crate::enums::transfer_policy::TransferPolicy;
+    use crate::enums::webdav_depth::WebDavDepth;
     use crate::enums::{AdapterCapability, ErrorCode, Protocol};
     use crate::error::AppError;
     use crate::local_fs::{reserve_after_final_event, AtomicDownloadFile};
@@ -101,11 +102,15 @@ mod impl_ {
             method: &str,
             url: &str,
             body: Option<&str>,
+            depth: Option<WebDavDepth>,
         ) -> Result<reqwest::Response, AppError> {
             let client = self.client.as_ref().ok_or_else(AppError::not_connected)?;
             let m = Method::from_bytes(method.as_bytes())
                 .map_err(|e| AppError::protocol_error(e.to_string()))?;
             let mut req = self.authenticated(client.request(m, url));
+            if let Some(depth) = depth {
+                req = Self::apply_depth(req, depth);
+            }
             if let Some(b) = body {
                 req = req
                     .header("Content-Type", "application/xml")
@@ -119,6 +124,10 @@ mod impl_ {
                 return Err(AppError::protocol_error(format!("HTTP {}", resp.status())));
             }
             Ok(resp)
+        }
+
+        fn apply_depth(request: RequestBuilder, depth: WebDavDepth) -> RequestBuilder {
+            request.header("Depth", depth.as_header_value())
         }
 
         /// 为请求附加当前会话的基本认证信息。
@@ -227,22 +236,19 @@ mod impl_ {
                             }
                             "response" => {
                                 if let Some(f) = current.take() {
-                                    // 跳过目录本身（href 等于 list_path）
-                                    let normalized = f.full_path.trim_end_matches('/');
-                                    let list_norm = list_path.trim_end_matches('/');
-                                    if !normalized.is_empty() && normalized != list_norm {
+                                    if let Some(logical_path) =
+                                        self.direct_child_path(&f.full_path, list_path)
+                                    {
                                         let mut file = f;
                                         if file.name.is_empty() {
-                                            file.name = file
-                                                .full_path
+                                            file.name = logical_path
                                                 .rsplit('/')
                                                 .next()
                                                 .unwrap_or("")
                                                 .to_string();
                                         }
-                                        // URL 解码文件名
                                         file.name = urlencoding_decode(&file.name);
-                                        file.full_path = urlencoding_decode(&file.full_path);
+                                        file.full_path = logical_path;
                                         files.push(file);
                                     }
                                 }
@@ -257,6 +263,43 @@ mod impl_ {
                 }
             }
             Ok(files)
+        }
+
+        fn direct_child_path(&self, href: &str, list_path: &str) -> Option<String> {
+            let logical_path = self.logical_path_from_href(href)?;
+            let list_path = normalize_webdav_path(list_path);
+            if logical_path == list_path {
+                return None;
+            }
+            let prefix = if list_path == "/" {
+                String::from("/")
+            } else {
+                format!("{list_path}/")
+            };
+            let relative = logical_path.strip_prefix(&prefix)?;
+            if relative.is_empty() || relative.contains('/') {
+                return None;
+            }
+            Some(logical_path)
+        }
+
+        fn logical_path_from_href(&self, href: &str) -> Option<String> {
+            let href_path = reqwest::Url::parse(href)
+                .map(|url| url.path().to_string())
+                .unwrap_or_else(|_| href.split(['?', '#']).next().unwrap_or(href).to_string());
+            let href_path = normalize_webdav_path(&urlencoding_decode(&href_path));
+            let service_path = reqwest::Url::parse(&self.base_url)
+                .map(|url| normalize_webdav_path(&urlencoding_decode(url.path())))
+                .unwrap_or_else(|_| String::from("/"));
+
+            if service_path == "/" {
+                return Some(href_path);
+            }
+            if href_path == service_path {
+                return Some(String::from("/"));
+            }
+            let relative = href_path.strip_prefix(&format!("{service_path}/"))?;
+            Some(format!("/{relative}"))
         }
     }
 
@@ -305,9 +348,14 @@ mod impl_ {
 
             // 验证连接：PROPFIND 根目录
             let url = self.url("/");
-            self.request("PROPFIND", &url, Some(PROPFIND_BODY))
-                .await
-                .map_err(|e| AppError::connection_failed(format!("WebDAV 连接验证失败: {e}")))?;
+            self.request(
+                "PROPFIND",
+                &url,
+                Some(PROPFIND_BODY),
+                Some(WebDavDepth::Resource),
+            )
+            .await
+            .map_err(|e| AppError::connection_failed(format!("WebDAV 连接验证失败: {e}")))?;
 
             self.current_dir = "/".to_string();
             Ok(())
@@ -319,7 +367,14 @@ mod impl_ {
 
         async fn list_directory(&self, path: &str) -> Result<Vec<RemoteFile>, AppError> {
             let url = self.url(path);
-            let resp = self.request("PROPFIND", &url, Some(PROPFIND_BODY)).await?;
+            let resp = self
+                .request(
+                    "PROPFIND",
+                    &url,
+                    Some(PROPFIND_BODY),
+                    Some(WebDavDepth::Children),
+                )
+                .await?;
             let xml = resp
                 .text()
                 .await
@@ -444,7 +499,7 @@ mod impl_ {
 
         async fn delete_file(&self, path: &str) -> Result<(), AppError> {
             let url = self.url(path);
-            self.request("DELETE", &url, None).await?;
+            self.request("DELETE", &url, None, None).await?;
             Ok(())
         }
 
@@ -455,7 +510,7 @@ mod impl_ {
 
         async fn create_directory(&self, path: &str) -> Result<(), AppError> {
             let url = self.url(path);
-            self.request("MKCOL", &url, None).await?;
+            self.request("MKCOL", &url, None, None).await?;
             Ok(())
         }
 
@@ -485,7 +540,13 @@ mod impl_ {
         async fn change_dir(&mut self, path: &str) -> Result<(), AppError> {
             // 验证目录存在（PROPFIND）
             let url = self.url(path);
-            self.request("PROPFIND", &url, Some(PROPFIND_BODY)).await?;
+            self.request(
+                "PROPFIND",
+                &url,
+                Some(PROPFIND_BODY),
+                Some(WebDavDepth::Resource),
+            )
+            .await?;
             self.current_dir = path.to_string();
             Ok(())
         }
@@ -497,7 +558,12 @@ mod impl_ {
             let url = self.url(&self.current_dir);
             tokio::time::timeout(
                 Duration::from_secs(ConnectionPolicy::HealthProbeTimeoutSeconds.value()),
-                self.request("PROPFIND", &url, Some(PROPFIND_BODY)),
+                self.request(
+                    "PROPFIND",
+                    &url,
+                    Some(PROPFIND_BODY),
+                    Some(WebDavDepth::Resource),
+                ),
             )
             .await
             .is_ok_and(|result| result.is_ok())
@@ -525,11 +591,22 @@ mod impl_ {
         String::from_utf8_lossy(&result).into_owned()
     }
 
+    fn normalize_webdav_path(path: &str) -> String {
+        let trimmed = path.trim_matches('/');
+        if trimmed.is_empty() {
+            String::from("/")
+        } else {
+            format!("/{trimmed}")
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::WebDavAdapter;
+        use crate::enums::webdav_depth::WebDavDepth;
         use crate::enums::Protocol;
         use crate::models::RemoteHost;
+        use reqwest::{Client, Method};
         use uuid::Uuid;
 
         fn webdav_host(address: &str, port: u16, base_path: Option<&str>) -> RemoteHost {
@@ -590,11 +667,77 @@ mod impl_ {
 
             assert_eq!(files.len(), 2);
             assert_eq!(files[0].name, "测试");
-            assert_eq!(files[0].full_path, "/files/测试/");
+            assert_eq!(files[0].full_path, "/files/测试");
             assert!(files[0].is_directory);
             assert_eq!(files[1].name, "a&b.txt");
             assert_eq!(files[1].size, 42);
             assert!(!files[1].is_directory);
+        }
+
+        #[test]
+        fn maps_service_hrefs_to_direct_children_of_the_logical_directory() {
+            let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+                <D:multistatus xmlns:D="DAV:">
+                  <D:response>
+                    <D:href>/dav/</D:href>
+                    <D:propstat><D:prop><D:displayname>dav</D:displayname><D:resourcetype><D:collection/></D:resourcetype></D:prop></D:propstat>
+                  </D:response>
+                  <D:response>
+                    <D:href>/dav/Breeze_v1/</D:href>
+                    <D:propstat><D:prop><D:displayname>Breeze_v1</D:displayname><D:resourcetype><D:collection/></D:resourcetype></D:prop></D:propstat>
+                  </D:response>
+                  <D:response>
+                    <D:href>https://dav.example.com/dav/test/</D:href>
+                    <D:propstat><D:prop><D:displayname>test</D:displayname><D:resourcetype><D:collection/></D:resourcetype></D:prop></D:propstat>
+                  </D:response>
+                  <D:response>
+                    <D:href>/dav/test/nested.txt</D:href>
+                    <D:propstat><D:prop><D:displayname>nested.txt</D:displayname><D:getcontentlength>7</D:getcontentlength></D:prop></D:propstat>
+                  </D:response>
+                </D:multistatus>"#;
+            let mut adapter = WebDavAdapter::new();
+            adapter.base_url = "https://dav.example.com/dav".to_string();
+
+            let files = adapter
+                .parse_multistatus(xml, "/")
+                .expect("AList-style multistatus should parse");
+
+            assert_eq!(files.len(), 2);
+            assert_eq!(files[0].name, "Breeze_v1");
+            assert_eq!(files[0].full_path, "/Breeze_v1");
+            assert_eq!(files[1].name, "test");
+            assert_eq!(files[1].full_path, "/test");
+            assert_eq!(
+                adapter.url(&files[1].full_path),
+                "https://dav.example.com/dav/test"
+            );
+
+            let nested = adapter
+                .parse_multistatus(xml, "/test")
+                .expect("nested logical directory should parse");
+            assert_eq!(nested.len(), 1);
+            assert_eq!(nested[0].name, "nested.txt");
+            assert_eq!(nested[0].full_path, "/test/nested.txt");
+        }
+
+        #[test]
+        fn propfind_requests_always_use_an_explicit_finite_depth() {
+            let client = Client::new();
+            for (depth, expected) in [(WebDavDepth::Resource, "0"), (WebDavDepth::Children, "1")] {
+                let request = WebDavAdapter::apply_depth(
+                    client.request(Method::GET, "https://dav.example.com/dav"),
+                    depth,
+                )
+                .build()
+                .expect("valid request");
+                assert_eq!(
+                    request
+                        .headers()
+                        .get("Depth")
+                        .and_then(|value| value.to_str().ok()),
+                    Some(expected)
+                );
+            }
         }
     }
 }

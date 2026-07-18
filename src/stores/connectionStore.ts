@@ -19,6 +19,8 @@ interface ConnectionState {
   hostCapabilities: Record<string, AdapterCapability>;
   /** 加载中 */
   isLoading: boolean;
+  /** 主机顺序正在持久化 */
+  isReordering: boolean;
   /** 错误信息 */
   error: string | null;
 
@@ -30,16 +32,18 @@ interface ConnectionState {
   addHost: (host: RemoteHost) => Promise<void>;
   updateHost: (host: RemoteHost, clearPassword?: boolean) => Promise<void>;
   deleteHost: (id: string) => Promise<void>;
+  reorderHosts: (sourceId: string, targetId: string) => Promise<void>;
   setConnectionStatus: (hostId: string, status: ConnectionStatus) => void;
 }
 
-export const useConnectionStore = create<ConnectionState>((set) => ({
+export const useConnectionStore = create<ConnectionState>((set, get) => ({
   hosts: [],
   connectedHostIds: [],
   selectedHostId: null,
   connectionStatus: {},
   hostCapabilities: {},
   isLoading: false,
+  isReordering: false,
   error: null,
 
   loadHosts: async () => {
@@ -114,6 +118,27 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
       connectedHostIds: state.connectedHostIds.filter((h) => h !== id),
       selectedHostId: state.selectedHostId === id ? null : state.selectedHostId,
     }));
+  },
+
+  reorderHosts: async (sourceId, targetId) => {
+    const state = get();
+    if (state.isReordering || sourceId === targetId) return;
+    const sourceIndex = state.hosts.findIndex((host) => host.id === sourceId);
+    const targetIndex = state.hosts.findIndex((host) => host.id === targetId);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+
+    const previousHosts = state.hosts;
+    const hosts = [...previousHosts];
+    const [moved] = hosts.splice(sourceIndex, 1);
+    hosts.splice(targetIndex, 0, moved);
+    set({ hosts, isReordering: true, error: null });
+    try {
+      await tauri.reorderHosts(hosts.map((host) => host.id));
+      set({ isReordering: false });
+    } catch (error) {
+      set({ hosts: previousHosts, isReordering: false, error: formatAppError(error) });
+      throw error;
+    }
   },
 
   setConnectionStatus: (hostId, status) =>

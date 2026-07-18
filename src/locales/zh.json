@@ -13,6 +13,7 @@
     "remove": "移除",
     "browse": "浏览",
     "unknownError": "未知错误",
+    "notice": "提示",
     "confirmation": "确认操作",
     "quickAction": "快速操作"
   },
@@ -199,6 +200,8 @@
     "newFile": "新建文件"
   },
   "editor": {
+    "unsupportedTitle": "不支持的编辑类型",
+    "unsupportedMessage": "{{name}} 不是受支持的文本文件，无法使用编辑功能打开。",
     "plainText": "纯文本",
     "save": "保存",
     "saving": "正在同步…",

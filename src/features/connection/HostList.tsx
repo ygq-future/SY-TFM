@@ -1,6 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pencil, Plug, Plus, Server, Trash2, Unplug } from 'lucide-react';
+import {
+  closestCenter,
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
+import { CSS } from '@dnd-kit/utilities';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { cn } from '../../lib/utils';
 import { HostEditDialog } from './HostEditDialog';
@@ -39,6 +51,52 @@ function formatHostEndpoint(host: RemoteHost): string {
   return `${host.host}:${host.port || defaultPort(host.protocol)}`;
 }
 
+function SortableHostRow({
+  hostId,
+  className,
+  disabled,
+  suppressActions,
+  onClick,
+  onDoubleClick,
+  onContextMenu,
+  onPointerLeave,
+  children,
+}: {
+  hostId: string;
+  className: string;
+  disabled: boolean;
+  suppressActions: boolean;
+  onClick: () => void;
+  onDoubleClick: () => void;
+  onContextMenu: (event: ReactMouseEvent<HTMLElement>) => void;
+  onPointerLeave: () => void;
+  children: ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: hostId,
+    disabled,
+  });
+  return (
+    <article
+      ref={setNodeRef}
+      className={cn(
+        className,
+        isDragging && 'sidebar-host-row--dragging',
+        suppressActions && 'sidebar-host-row--actions-suppressed',
+      )}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      onClick={onClick}
+      onDoubleClick={onDoubleClick}
+      onContextMenu={onContextMenu}
+      onPointerLeave={onPointerLeave}
+      {...listeners}
+      {...attributes}
+    >
+      {children}
+    </article>
+  );
+}
+
 /** 紧凑主机侧栏。 */
 export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => void }) {
   const { t } = useTranslation();
@@ -48,12 +106,14 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
     selectedHostId,
     connectionStatus,
     isLoading,
+    isReordering,
     loadHosts,
     selectHost,
     connectHost,
     disconnectHost,
     updateHost,
     deleteHost,
+    reorderHosts,
   } = useConnectionStore();
 
   const [editingHost, setEditingHost] = useState<RemoteHost | null>(null);
@@ -73,6 +133,10 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
     y: number;
   } | null>(null);
   const [tagFilter, setTagFilter] = useState('');
+  const [suppressedActionsHostId, setSuppressedActionsHostId] = useState<string | null>(null);
+  const hostSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  );
 
   useEffect(() => {
     void loadHosts();
@@ -150,6 +214,12 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
       });
     }
   };
+  const handleHostDragEnd = (event: DragEndEvent) => {
+    setSuppressedActionsHostId(String(event.active.id));
+    const targetId = event.over?.id;
+    if (!targetId || event.active.id === targetId) return;
+    void reorderHosts(String(event.active.id), String(targetId)).catch(() => undefined);
+  };
 
   return (
     <aside className="host-sidebar" aria-label={t('hosts.list')}>
@@ -177,110 +247,133 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
         />
       </div>
 
-      <div className="host-sidebar-list">
-        {isLoading ? (
-          <div className="sidebar-empty">{t('hosts.loading')}</div>
-        ) : visibleHosts.length === 0 ? (
-          <button
-            className="sidebar-empty sidebar-empty--action"
-            type="button"
-            onClick={openNewDialog}
-          >
-            <Plus />
-            <span>{t(hosts.length === 0 ? 'hosts.addFirst' : 'hosts.noMatch')}</span>
-          </button>
-        ) : (
-          visibleHosts.map((host) => {
-            const isConnected = connectedHostIds.includes(host.id);
-            const isSelected = selectedHostId === host.id;
-            const status = connectionStatus[host.id];
-            const isOnline = status === 'connected';
-            const firstTag = host.tags
-              .split(',')
-              .map((tag) => tag.trim())
-              .find(Boolean);
-
-            return (
-              <article
-                key={host.id}
-                className={cn('sidebar-host-row', isSelected && 'sidebar-host-row--selected')}
-                onClick={() => selectHost(host.id)}
-                onDoubleClick={() => {
-                  if (isConnected) onSelectHost(host.id);
-                  else handleConnect(host);
-                }}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  selectHost(host.id);
-                  setContextMenu({ host, x: event.clientX, y: event.clientY });
-                }}
+      <DndContext
+        sensors={hostSensors}
+        autoScroll={false}
+        collisionDetection={closestCenter}
+        modifiers={[restrictToVerticalAxis]}
+        onDragCancel={() => setSuppressedActionsHostId(null)}
+        onDragEnd={handleHostDragEnd}
+      >
+        <SortableContext
+          items={visibleHosts.map((host) => host.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          <div className="host-sidebar-list">
+            {isLoading ? (
+              <div className="sidebar-empty">{t('hosts.loading')}</div>
+            ) : visibleHosts.length === 0 ? (
+              <button
+                className="sidebar-empty sidebar-empty--action"
+                type="button"
+                onClick={openNewDialog}
               >
-                <div className="sidebar-host-icon">
-                  <Server />
-                </div>
-                <div className="sidebar-host-copy">
-                  <strong>{host.name}</strong>
-                  <span>{formatHostEndpoint(host)}</span>
-                </div>
-                {firstTag && <span className="sidebar-host-tag">{firstTag}</span>}
-                <div className="sidebar-host-actions">
-                  <button
-                    type="button"
-                    title={t('common.edit')}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openEditDialog(host);
+                <Plus />
+                <span>{t(hosts.length === 0 ? 'hosts.addFirst' : 'hosts.noMatch')}</span>
+              </button>
+            ) : (
+              visibleHosts.map((host) => {
+                const isConnected = connectedHostIds.includes(host.id);
+                const isSelected = selectedHostId === host.id;
+                const status = connectionStatus[host.id];
+                const isOnline = status === 'connected';
+                const firstTag = host.tags
+                  .split(',')
+                  .map((tag) => tag.trim())
+                  .find(Boolean);
+
+                return (
+                  <SortableHostRow
+                    key={host.id}
+                    hostId={host.id}
+                    disabled={isReordering}
+                    suppressActions={suppressedActionsHostId === host.id}
+                    className={cn('sidebar-host-row', isSelected && 'sidebar-host-row--selected')}
+                    onClick={() => selectHost(host.id)}
+                    onDoubleClick={() => {
+                      if (isConnected) onSelectHost(host.id);
+                      else handleConnect(host);
+                    }}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      selectHost(host.id);
+                      setContextMenu({ host, x: event.clientX, y: event.clientY });
+                    }}
+                    onPointerLeave={() => {
+                      if (suppressedActionsHostId === host.id) setSuppressedActionsHostId(null);
                     }}
                   >
-                    <Pencil />
-                  </button>
-                  {isConnected ? (
-                    <button
-                      type="button"
-                      title={t('common.disconnect')}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void disconnectHost(host.id);
-                      }}
+                    <div className="sidebar-host-icon">
+                      <Server />
+                    </div>
+                    <div className="sidebar-host-copy">
+                      <strong>{host.name}</strong>
+                      <span>{formatHostEndpoint(host)}</span>
+                    </div>
+                    {firstTag && <span className="sidebar-host-tag">{firstTag}</span>}
+                    <div
+                      className="sidebar-host-actions"
+                      onPointerDown={(event) => event.stopPropagation()}
                     >
-                      <Unplug />
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      title={t('common.connect')}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleConnect(host);
-                      }}
-                    >
-                      <Plug />
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    title={t('common.delete')}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setPendingDeleteHost(host);
-                    }}
-                  >
-                    <Trash2 />
-                  </button>
-                </div>
-                <span
-                  className={cn(
-                    'sidebar-connection-dot',
-                    isOnline && 'sidebar-connection-dot--online',
-                    (status === 'connecting' || status === 'reconnecting') &&
-                      'sidebar-connection-dot--busy',
-                  )}
-                />
-              </article>
-            );
-          })
-        )}
-      </div>
+                      <button
+                        type="button"
+                        title={t('common.edit')}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openEditDialog(host);
+                        }}
+                      >
+                        <Pencil />
+                      </button>
+                      {isConnected ? (
+                        <button
+                          type="button"
+                          title={t('common.disconnect')}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void disconnectHost(host.id);
+                          }}
+                        >
+                          <Unplug />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          title={t('common.connect')}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleConnect(host);
+                          }}
+                        >
+                          <Plug />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        title={t('common.delete')}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setPendingDeleteHost(host);
+                        }}
+                      >
+                        <Trash2 />
+                      </button>
+                    </div>
+                    <span
+                      className={cn(
+                        'sidebar-connection-dot',
+                        isOnline && 'sidebar-connection-dot--online',
+                        (status === 'connecting' || status === 'reconnecting') &&
+                          'sidebar-connection-dot--busy',
+                      )}
+                    />
+                  </SortableHostRow>
+                );
+              })
+            )}
+          </div>
+        </SortableContext>
+      </DndContext>
 
       {isDialogOpen && <HostEditDialog host={editingHost} onClose={() => setIsDialogOpen(false)} />}
       {passwordPromptHost && (

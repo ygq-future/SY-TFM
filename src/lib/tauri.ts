@@ -331,6 +331,11 @@ export async function saveHost(host: RemoteHost, clearPassword = false): Promise
   await invoke('save_host', { host, clearPassword });
 }
 
+/** 按 ID 顺序持久化主机列表。 */
+export async function reorderHosts(hostIds: string[]): Promise<void> {
+  await invoke('reorder_hosts', { hostIds });
+}
+
 /** 删除主机。 */
 export async function deleteHost(hostId: string): Promise<void> {
   await invoke('delete_host', { hostId });

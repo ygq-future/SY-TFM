@@ -2027,6 +2027,75 @@ button:disabled {
   }
 }
 
+/* Desktop selection semantics: the shell behaves like a native file manager. */
+.app-shell {
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable='true'],
+[role='textbox'],
+.cm-content {
+  user-select: text;
+}
+
+.sidebar-host-row {
+  cursor: grab;
+  touch-action: none;
+  will-change: transform;
+  transition:
+    transform 150ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 140ms ease,
+    background-color 140ms ease,
+    opacity 140ms ease;
+}
+
+.sidebar-host-row--dragging {
+  z-index: 4;
+  cursor: grabbing;
+  opacity: 0.72;
+  box-shadow: 0 12px 24px color-mix(in srgb, var(--app-canvas) 28%, transparent);
+}
+
+.sidebar-host-actions {
+  align-items: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-host-row {
+    transition: none;
+  }
+}
+
+/* Native file-manager selection rules also cover body-mounted portals. */
+body {
+  user-select: none;
+}
+
+.global-status-bar {
+  cursor: text;
+  user-select: text;
+}
+
+.global-status-bar * {
+  user-select: text;
+}
+
+.global-status-bar button {
+  cursor: pointer;
+  user-select: none;
+}
+
+.host-sidebar-list {
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
+.host-editor-intro > div > p:last-child {
+  font-size: var(--type-caption-size);
+}
+
 /* Status bar geometry follows the configured data type scale without allowing child overflow. */
 :root {
   --statusbar-height: clamp(26px, calc(var(--type-data-size, 12px) + 14px), 38px);
@@ -7269,5 +7338,50 @@ html[data-theme='dark'] .settings-panel {
   .online-editor,
   .online-editor-synced {
     animation: none;
+  }
+}
+
+/* Final interaction/type overrides must remain after every legacy theme layer. */
+.host-editor-intro > div > p:last-child {
+  font-size: var(--type-caption-size);
+}
+
+.sidebar-host-row--dragging .sidebar-host-actions,
+.sidebar-host-row--actions-suppressed .sidebar-host-actions {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.transfer-status > .transfer-task:only-child {
+  margin-inline: auto;
+}
+
+.dialog-message--notice {
+  color: var(--app-ink);
+}
+
+.dialog-message--notice > svg {
+  color: var(--accent-strong);
+}
+
+/* Keep drag affordances authoritative over the older host-card theme layers. */
+.sidebar-host-row {
+  cursor: grab;
+  touch-action: none;
+  will-change: transform;
+  transition:
+    transform 150ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 140ms ease,
+    background-color 140ms ease,
+    opacity 140ms ease;
+}
+
+.sidebar-host-row--dragging {
+  cursor: grabbing;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-host-row {
+    transition: none;
   }
 }

@@ -772,6 +772,8 @@ pub struct EditSessionManager {
 
 活动会话以 `(host_id, remote_path)` 作为复用键。系统编辑器窗口关闭不会终止 watcher；
 只要主机连接仍有效且临时文件存在，后续 Remote Edit 会直接重新打开同一个本地文件。
+临时路径采用 `%TEMP%/SY-TFM/<完整会话 UUID>/<源文件名>_<UUID 后 8 位>.<扩展名>`；
+完整 UUID 目录负责绝对隔离，可见短后缀用于在系统编辑器中区分不同目录下的同名文件。
 应用启动时会扫描 `%TEMP%/SY-TFM/<session-uuid>/`，只清理能够取得独占租约的失效会话；
 其他 SY-TFM 实例仍持有锁的目录与非会话目录均会保留。
 

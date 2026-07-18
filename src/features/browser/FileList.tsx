@@ -9,7 +9,7 @@ import type { AdapterCapability } from '../../types/enums/AdapterCapability';
 import { getFileIcon } from '../../lib/fileIcons';
 import { cn } from '../../lib/utils';
 import type { SortColumn } from '../../types/enums/SortColumn';
-import { FILE_ROW_HEIGHT } from './browserViewModel';
+import { FILE_ROW_HEIGHT, formatRemoteModified } from './browserViewModel';
 import type { PaneIndex } from '../../stores/browserStore';
 
 /** 能力位标志常量（对应 Rust AdapterCapability bitflags）。 */
@@ -374,7 +374,7 @@ export function FileList({
                     <div className="file-permission-cell">{file.permissions ?? '-'}</div>
                   </>
                 )}
-                <div className="file-date-cell">{file.lastModified}</div>
+                <div className="file-date-cell">{formatRemoteModified(file.lastModified)}</div>
               </DndFileRow>
             );
           })}

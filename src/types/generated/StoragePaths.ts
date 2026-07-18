@@ -3,13 +3,12 @@
 /**
  * 当前平台解析后的默认存储路径。
  */
-export type StoragePaths = {
-  /**
-   * 操作系统的默认下载目录。
-   */
-  defaultDownloadPath: string;
-  /**
-   * SY-TFM 默认应用数据目录。
-   */
-  defaultDataPath: string;
-};
+export type StoragePaths = { 
+/**
+ * 操作系统的默认下载目录。
+ */
+defaultDownloadPath: string, 
+/**
+ * SY-TFM 默认应用数据目录。
+ */
+defaultDataPath: string, };

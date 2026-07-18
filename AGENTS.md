@@ -266,6 +266,9 @@ locales/      en.json / zh.json（i18n）
 | @uiw/react-codemirror | 4.24 |
 | @tanstack/react-virtual | 3.13 |
 | @dnd-kit/core | 6.3 |
+| @dnd-kit/sortable | 10.0 |
+| @dnd-kit/modifiers | 9.0 |
+| @dnd-kit/utilities | 3.2 |
 | sonner | 2.0 |
 | react-hook-form | 7.62 |
 | zod | 4.1 |
