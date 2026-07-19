@@ -66,6 +66,7 @@ interface BrowserState {
   cancelTransfer: (operationId: string) => Promise<void>;
   setOperationMessage: (message: string, isError?: boolean) => void;
   clearOperationMessage: () => void;
+  clearDisconnectedPanes: (connectedHostIds: string[]) => void;
   downloadSelected: (pane: PaneIndex, hostId: string, localDir: string) => Promise<void>;
   deleteSelected: (pane: PaneIndex, hostId: string) => Promise<void>;
   renameFile: (pane: PaneIndex, hostId: string, file: RemoteFile, newName: string) => Promise<void>;
@@ -192,6 +193,13 @@ export const useBrowserStore = create<BrowserState>((set, get) => {
     setOperationMessage: (operationMessage, operationIsError = false) =>
       set({ operationMessage, operationIsError }),
     clearOperationMessage: () => set({ operationMessage: '', operationIsError: false }),
+    clearDisconnectedPanes: (connectedHostIds) =>
+      set((state) => {
+        const panes = state.panes.map((pane) =>
+          pane.hostId && !connectedHostIds.includes(pane.hostId) ? createPaneState() : pane,
+        ) as [BrowserPaneState, BrowserPaneState];
+        return { panes };
+      }),
 
     loadDirectory: async (paneIndex, hostId, path) => {
       if (get().panes[paneIndex].hostId !== hostId) return;

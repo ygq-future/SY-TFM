@@ -816,7 +816,8 @@ function GlobalStatusBar() {
   }, [refreshVaultStatus, vaultStatus?.refreshIntervalMs]);
   const transferList = Object.values(transfers);
   const pane = panes[activePane];
-  const paneError = pane.errorMessage;
+  const isPaneConnected = pane.hostId !== null && connectedHostIds.includes(pane.hostId);
+  const paneError = isPaneConnected ? pane.errorMessage : '';
   const busyConnection = Object.entries(connectionStatus).find(
     ([, status]) => status === 'connecting' || status === 'reconnecting',
   );
@@ -834,7 +835,7 @@ function GlobalStatusBar() {
     connectionMessage ||
     paneError ||
     operationMessage ||
-    (pane.isLoading
+    (isPaneConnected && pane.isLoading
       ? t('browser.readingRemote')
       : connectedHostIds.length > 0
         ? t('browser.activeConnections', { count: connectedHostIds.length })
@@ -927,13 +928,15 @@ function GlobalStatusBar() {
             </time>
           </span>
         )}
-        <span>
-          {pane.selectedFiles.length > 0
-            ? t('browser.selectedCount', { count: pane.selectedFiles.length })
-            : t('browser.itemCount', {
-                count: pane.files.filter((file) => file.name !== '..').length,
-              })}
-        </span>
+        {isPaneConnected && (
+          <span className="status-file-count">
+            {pane.selectedFiles.length > 0
+              ? t('browser.selectedCount', { count: pane.selectedFiles.length })
+              : t('browser.itemCount', {
+                  count: pane.files.filter((file) => file.name !== '..').length,
+                })}
+          </span>
+        )}
       </div>
     </footer>
   );
@@ -989,6 +992,7 @@ function AppInner() {
     updateTransfer,
     setOperationMessage,
     clearOperationMessage,
+    clearDisconnectedPanes,
     moveFiles,
     transferFiles,
   } = useBrowserStore();
@@ -1432,8 +1436,9 @@ function AppInner() {
   }, [connectedHostIds, reconnectHost, setConnectionStatus]);
 
   useEffect(() => {
+    clearDisconnectedPanes(connectedHostIds);
     setPaneHostIds((current) => reconcilePaneHosts(current, connectedHostIds, isDualPane));
-  }, [connectedHostIds, isDualPane]);
+  }, [clearDisconnectedPanes, connectedHostIds, isDualPane]);
 
   const assignHostToPane = useCallback(
     (hostId: string) => {

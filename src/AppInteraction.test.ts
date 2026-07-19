@@ -95,6 +95,20 @@ describe('app shell interaction wiring', () => {
     expect(source).toContain('lastSyncedAt');
   });
 
+  it('hides file metadata after the active pane host disconnects', () => {
+    expect(source).toContain('clearDisconnectedPanes(connectedHostIds)');
+    expect(source).toContain('isPaneConnected &&');
+  });
+
+  it('keeps the file count on one line so it cannot compress vault metadata', () => {
+    expect(source).toContain('status-file-count');
+    expect(css).toMatch(
+      /\.status-file-count\s*\{[^}]*flex:\s*0\s+0\s+auto;[^}]*white-space:\s*nowrap;/s,
+    );
+    expect(css).toMatch(/\.vault-status-meta\s*>\s*time\s*\{[^}]*flex:\s*0\s+0\s+auto;/s);
+    expect(css).toMatch(/\.status-meta\s*>\s*\.vault-status-meta\s*\{[^}]*flex:\s*0\s+1\s+auto;/s);
+  });
+
   it('clears stale operation notices when a newer connection lifecycle starts', () => {
     const browserStore = readFileSync(new URL('./stores/browserStore.ts', import.meta.url), 'utf8');
     expect(browserStore).toContain('clearOperationMessage');

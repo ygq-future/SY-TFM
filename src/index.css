@@ -3966,7 +3966,27 @@ body {
 }
 
 .status-meta {
+  overflow: hidden;
   justify-content: flex-end;
+}
+
+.status-meta > .vault-status-meta {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.vault-status-meta > span:first-of-type {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.vault-status-meta > time {
+  flex: 0 0 auto;
+}
+
+.status-file-count {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .status-separator {

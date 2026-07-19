@@ -152,4 +152,37 @@ describe('browser store pane ownership', () => {
     expect(useBrowserStore.getState().operationMessage).toBe('');
     expect(useBrowserStore.getState().operationIsError).toBe(false);
   });
+
+  it('clears cached directory data when its host disconnects', () => {
+    useBrowserStore.setState((state) => ({
+      panes: [
+        {
+          ...state.panes[0],
+          hostId: 'host-a',
+          currentPath: '/workspace',
+          files: [
+            {
+              name: 'README.md',
+              fullPath: '/workspace/README.md',
+              size: 42,
+              isDirectory: false,
+              lastModified: '2026-07-19 10:00',
+              owner: null,
+              permissions: null,
+            },
+          ],
+        },
+        state.panes[1],
+      ],
+    }));
+
+    useBrowserStore.getState().clearDisconnectedPanes([]);
+
+    expect(useBrowserStore.getState().panes[0]).toMatchObject({
+      hostId: null,
+      files: [],
+      currentPath: '/',
+      selectedFiles: [],
+    });
+  });
 });
