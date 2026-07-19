@@ -3,4 +3,4 @@
 /**
  * 排序方向。
  */
-export type SortOrder = "ascending" | "descending";
+export type SortOrder = 'ascending' | 'descending';

@@ -19,6 +19,7 @@ describe('Dialog components', () => {
     expect(markup).toContain('确认删除');
     expect(markup).toContain('操作不可撤销');
     expect(markup).toContain('danger-button');
+    expect(markup).toContain('modal-backdrop--dialog');
   });
 
   it('renders the input default value', () => {

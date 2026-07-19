@@ -307,13 +307,23 @@ fn storage_write_error(error: impl std::fmt::Display) -> AppError {
 
 /// 将旧配置中的明文密码升级为 `enc.v1:` 密文。
 fn encrypt_plaintext_passwords(settings: &mut AppSettings) -> Result<bool, AppError> {
-    let has_plaintext = settings.hosts.iter().any(|host| {
+    let host_has_plaintext = settings.hosts.iter().any(|host| {
         !host.password.is_empty()
             && !host
                 .password
                 .starts_with(crate::crypto::secret_protector::ENCRYPTED_PREFIX)
     });
-    if !has_plaintext {
+    let sync_password_has_plaintext = !settings.vault_sync.password.is_empty()
+        && !settings
+            .vault_sync
+            .password
+            .starts_with(crate::crypto::secret_protector::ENCRYPTED_PREFIX);
+    let backup_password_has_plaintext = !settings.vault_sync.backup_password.is_empty()
+        && !settings
+            .vault_sync
+            .backup_password
+            .starts_with(crate::crypto::secret_protector::ENCRYPTED_PREFIX);
+    if !host_has_plaintext && !sync_password_has_plaintext && !backup_password_has_plaintext {
         return Ok(false);
     }
 
@@ -327,6 +337,13 @@ fn encrypt_plaintext_passwords(settings: &mut AppSettings) -> Result<bool, AppEr
         {
             host.password = protector.encrypt(&host.password)?;
         }
+    }
+    if sync_password_has_plaintext {
+        settings.vault_sync.password = protector.encrypt(&settings.vault_sync.password)?;
+    }
+    if backup_password_has_plaintext {
+        settings.vault_sync.backup_password =
+            protector.encrypt(&settings.vault_sync.backup_password)?;
     }
     Ok(true)
 }
@@ -462,8 +479,10 @@ mod tests {
         let dir = TestDir::new();
         let primary = dir.path().join("settings.json");
         let backup = backup_path(&primary);
-        let mut expected = AppSettings::default();
-        expected.accent_color = "backup-accent".to_string();
+        let expected = AppSettings {
+            accent_color: "backup-accent".to_string(),
+            ..AppSettings::default()
+        };
         let expected_json = serde_json::to_vec_pretty(&expected).expect("serialize backup");
 
         std::fs::write(&primary, "{ broken").expect("write corrupt primary");
@@ -490,8 +509,10 @@ mod tests {
         let dir = TestDir::new();
         let directory_path = dir.path().join("settings.json");
         std::fs::create_dir(&directory_path).expect("create directory at settings path");
-        let mut backup = AppSettings::default();
-        backup.accent_color = "must-not-load".to_string();
+        let backup = AppSettings {
+            accent_color: "must-not-load".to_string(),
+            ..AppSettings::default()
+        };
         std::fs::write(
             backup_path(&directory_path),
             serde_json::to_vec_pretty(&backup).expect("serialize backup"),
@@ -521,8 +542,10 @@ mod tests {
     fn corrupt_primary_settings_falls_back_to_backup() {
         let dir = TestDir::new();
         let primary = dir.path().join("settings.json");
-        let mut expected = AppSettings::default();
-        expected.accent_color = "backup-accent".to_string();
+        let expected = AppSettings {
+            accent_color: "backup-accent".to_string(),
+            ..AppSettings::default()
+        };
 
         std::fs::write(&primary, "{ broken").expect("write corrupt primary");
         std::fs::write(
@@ -543,8 +566,10 @@ mod tests {
         let dir = TestDir::new();
         let locator = dir.path().join("settings.json");
         let custom_dir = dir.path().join("custom");
-        let mut backup = AppSettings::default();
-        backup.default_data_path = Some(custom_dir.to_string_lossy().into_owned());
+        let backup = AppSettings {
+            default_data_path: Some(custom_dir.to_string_lossy().into_owned()),
+            ..AppSettings::default()
+        };
 
         std::fs::write(&locator, "not json").expect("write corrupt locator");
         std::fs::write(

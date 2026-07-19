@@ -3,4 +3,4 @@
 /**
  * 文件传输方向。
  */
-export type TransferDirection = "localToRemote" | "remoteToLocal" | "remoteToRemote";
+export type TransferDirection = 'localToRemote' | 'remoteToLocal' | 'remoteToRemote';

@@ -3,28 +3,29 @@
 /**
  * 下载命令请求参数。
  */
-export type DownloadRequest = { 
-/**
- * 主机 ID。
- */
-hostId: string, 
-/**
- * 远程文件或目录路径。
- */
-remotePath: string, 
-/**
- * 本地目标基目录。
- */
-localDirectory: string, 
-/**
- * 未经本地路径拼接的原始文件名。
- */
-localName: string, 
-/**
- * 是否为目录。
- */
-isDirectory: boolean, 
-/**
- * 前端创建的传输操作 ID。
- */
-operationId: string, };
+export type DownloadRequest = {
+  /**
+   * 主机 ID。
+   */
+  hostId: string;
+  /**
+   * 远程文件或目录路径。
+   */
+  remotePath: string;
+  /**
+   * 本地目标基目录。
+   */
+  localDirectory: string;
+  /**
+   * 未经本地路径拼接的原始文件名。
+   */
+  localName: string;
+  /**
+   * 是否为目录。
+   */
+  isDirectory: boolean;
+  /**
+   * 前端创建的传输操作 ID。
+   */
+  operationId: string;
+};

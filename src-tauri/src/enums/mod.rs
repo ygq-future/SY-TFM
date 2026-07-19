@@ -21,6 +21,8 @@ pub mod sort_order;
 pub mod theme;
 pub mod transfer_direction;
 pub(crate) mod transfer_policy;
+pub(crate) mod vault_policy;
+pub(crate) mod vault_resource;
 pub(crate) mod webdav_depth;
 
 pub use adapter_capability::AdapterCapability;

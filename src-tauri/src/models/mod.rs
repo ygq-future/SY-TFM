@@ -8,6 +8,7 @@ pub mod remote_file;
 pub mod remote_host;
 pub mod settings;
 pub mod storage_paths;
+pub mod vault_sync;
 
 pub use download_request::DownloadRequest;
 pub use editor::{
@@ -19,3 +20,7 @@ pub use remote_file::RemoteFile;
 pub use remote_host::RemoteHost;
 pub use settings::AppSettings;
 pub use storage_paths::StoragePaths;
+pub use vault_sync::{
+    VaultKdfParameters, VaultKeyEnvelope, VaultSyncSettings, VaultSyncStatus,
+    VaultWebDavCredentials,
+};

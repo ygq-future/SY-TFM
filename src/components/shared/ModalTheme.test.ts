@@ -15,4 +15,9 @@ describe('portaled modal theme tokens', () => {
     expect(css).toMatch(/\.password-hint\s*\{[^}]*align-items:\s*center;/s);
     expect(css).toMatch(/\.password-form\s*\{[^}]*margin-top:\s*12px;/s);
   });
+
+  it('keeps nested dialogs above the settings surface', () => {
+    expect(css).toMatch(/\.settings-backdrop\s*\{[^}]*z-index:\s*240;/s);
+    expect(css).toMatch(/\.modal-backdrop--dialog\s*\{[^}]*z-index:\s*320;/s);
+  });
 });

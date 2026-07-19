@@ -8,6 +8,8 @@ pub(crate) enum AppDirectory {
     RemoteEditRoot,
     /// Remote Edit 会话目录中的跨进程租约文件。
     RemoteEditLease,
+    /// 从便携保险库恢复的背景图片目录。
+    VaultBackgroundRoot,
 }
 
 impl AppDirectory {
@@ -17,6 +19,7 @@ impl AppDirectory {
             Self::DownloadRoot => "SY-TFM",
             Self::RemoteEditRoot => "SY-TFM",
             Self::RemoteEditLease => ".lock",
+            Self::VaultBackgroundRoot => "backgrounds",
         }
     }
 }

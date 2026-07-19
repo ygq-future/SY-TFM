@@ -50,4 +50,10 @@ pub enum ErrorCode {
     OperationTimeout,
     /// 平台不支持
     PlatformUnsupported,
+    /// 跨设备保险库尚未解锁
+    VaultLocked,
+    /// 云端保险库版本与本机状态冲突
+    SyncConflict,
+    /// 保险库文件格式无效或已损坏
+    InvalidBackup,
 }

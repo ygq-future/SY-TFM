@@ -3,4 +3,4 @@
 /**
  * 运行平台。
  */
-export type Platform = "windows" | "macos" | "linux" | "ios" | "android";
+export type Platform = 'windows' | 'macos' | 'linux' | 'ios' | 'android';

@@ -8,8 +8,10 @@ import {
   FolderOpen,
   Image,
   Info,
+  KeyRound,
   Languages,
   Palette,
+  Save,
   Settings2,
   SlidersHorizontal,
   Type,
@@ -19,21 +21,25 @@ import {
 import { toast } from 'sonner';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { ModalPortal } from '../../components/shared/ModalPortal';
+import { ConfirmDialog } from '../../components/shared/Dialog';
 import { Select } from '../../components/ui/Select';
 import { Switch } from '../../components/ui/Switch';
 import { pickDirectory, pickFile, pickImageFile, pickSaveFile } from '../../lib/dialog';
 import {
-  exportSettingsEncrypted,
+  exportPortableVault,
   getAppInfo,
   getStoragePaths,
-  importSettingsEncrypted,
+  importPortableVault,
   loadBackgroundImage,
+  saveVaultBackupPassword,
   type AppInfo,
 } from '../../lib/tauri';
 import { ACCENT_COLORS, useSettingsStore, type AppearanceTheme } from '../../stores/settingsStore';
 import { useConnectionStore } from '../../stores/connectionStore';
 import type { StoragePaths } from '../../types/generated/StoragePaths';
 import { formatAppError } from '../../lib/errors';
+import { VaultSyncPanel } from './VaultSyncPanel';
+import { useVaultSyncStore } from '../../stores/vaultSyncStore';
 
 type SettingsSection = 'general' | 'appearance' | 'storage' | 'about';
 
@@ -52,15 +58,17 @@ function SettingRow({
   title,
   hint,
   icon,
+  className,
   children,
 }: {
   title: string;
   hint: string;
   icon: ReactNode;
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <div className="setting-row">
+    <div className={`setting-row${className ? ` ${className}` : ''}`}>
       <div className="setting-copy">
         <span className="setting-icon">{icon}</span>
         <div>
@@ -114,15 +122,24 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [storagePaths, setStoragePaths] = useState<StoragePaths | null>(null);
   const settings = useSettingsStore();
   const loadHosts = useConnectionStore((state) => state.loadHosts);
+  const refreshVaultStatus = useVaultSyncStore((state) => state.refreshStatus);
+  const vaultStatus = useVaultSyncStore((state) => state.status);
   const [backgroundPathDraft, setBackgroundPathDraft] = useState(settings.backgroundImage ?? '');
   const [downloadPathDraft, setDownloadPathDraft] = useState('');
   const [dataPathDraft, setDataPathDraft] = useState('');
+  const [portablePassword, setPortablePassword] = useState('');
+  const [portablePasswordConfirm, setPortablePasswordConfirm] = useState('');
+  const [isSavingBackupPassword, setIsSavingBackupPassword] = useState(false);
+  const [isBackupPasswordChangePending, setIsBackupPasswordChangePending] = useState(false);
 
   useEffect(() => {
     void getStoragePaths()
       .then(setStoragePaths)
       .catch(() => undefined);
   }, []);
+  useEffect(() => {
+    void refreshVaultStatus();
+  }, [refreshVaultStatus]);
   useEffect(() => {
     setBackgroundPathDraft(settings.backgroundImage ?? '');
   }, [settings.backgroundImage]);
@@ -185,6 +202,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   };
 
   const exportConfig = async () => {
+    if (portablePassword !== portablePasswordConfirm) {
+      toast.error(t('settings.storage.vaultPasswordMismatch'));
+      return;
+    }
     try {
       const path = await pickSaveFile(
         t('settings.storage.exportTitle'),
@@ -192,7 +213,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         t('settings.storage.backupFilter'),
       );
       if (!path) return;
-      await exportSettingsEncrypted(path);
+      await exportPortableVault(path, portablePassword);
+      await refreshVaultStatus();
+      setPortablePassword('');
+      setPortablePasswordConfirm('');
       toast.success(t('settings.storage.exportDone'));
     } catch (error) {
       toast.error(t('settings.storage.exportFailed', { error: String(error) }));
@@ -203,12 +227,47 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     try {
       const path = await pickFile(t('settings.storage.importTitle'));
       if (!path) return;
-      await importSettingsEncrypted(path);
-      await Promise.all([settings.hydrateSettings(), loadHosts()]);
+      await importPortableVault(path, portablePassword);
+      setPortablePassword('');
+      setPortablePasswordConfirm('');
+      await Promise.all([settings.hydrateSettings(), loadHosts(), refreshVaultStatus()]);
       toast.success(t('settings.storage.importDone'));
     } catch (error) {
       toast.error(t('settings.storage.importFailed', { error: String(error) }));
     }
+  };
+
+  const persistBackupPassword = async () => {
+    setIsBackupPasswordChangePending(false);
+    setIsSavingBackupPassword(true);
+    try {
+      await saveVaultBackupPassword(portablePassword, portablePasswordConfirm);
+      await refreshVaultStatus();
+      setPortablePassword('');
+      setPortablePasswordConfirm('');
+      toast.success(t('settings.storage.backupPasswordSaved'));
+    } catch {
+      toast.error(t('settings.storage.backupPasswordSaveFailed'));
+    } finally {
+      setIsSavingBackupPassword(false);
+      setIsBackupPasswordChangePending(false);
+    }
+  };
+
+  const requestBackupPasswordSave = () => {
+    if (Array.from(portablePassword).length < 8) {
+      toast.error(t('settings.storage.backupPasswordTooShort'));
+      return;
+    }
+    if (portablePassword !== portablePasswordConfirm) {
+      toast.error(t('settings.storage.vaultPasswordMismatch'));
+      return;
+    }
+    if (vaultStatus?.backupPasswordSaved) {
+      setIsBackupPasswordChangePending(true);
+      return;
+    }
+    void persistBackupPassword();
   };
 
   return (
@@ -558,6 +617,54 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                       </button>
                     </div>
                   </SettingRow>
+                  <SettingRow
+                    title={t('settings.storage.vaultPassword')}
+                    hint={t('settings.storage.backupPasswordPurpose')}
+                    icon={<KeyRound />}
+                    className="setting-row--backup-password"
+                  >
+                    <div className="shared-backup-passwords">
+                      <label className="vault-field backup-password-field">
+                        <span>{t('settings.storage.vaultPasswordInput')}</span>
+                        <input
+                          type="password"
+                          autoComplete="new-password"
+                          aria-label={t('settings.storage.vaultPasswordInput')}
+                          value={portablePassword}
+                          onChange={(event) => setPortablePassword(event.target.value)}
+                          placeholder={t('settings.storage.vaultPasswordPlaceholder')}
+                        />
+                      </label>
+                      <label className="vault-field backup-password-field">
+                        <span>{t('settings.storage.vaultPasswordConfirm')}</span>
+                        <input
+                          type="password"
+                          autoComplete="new-password"
+                          aria-label={t('settings.storage.vaultPasswordConfirm')}
+                          value={portablePasswordConfirm}
+                          onChange={(event) => setPortablePasswordConfirm(event.target.value)}
+                          placeholder={t('settings.storage.vaultPasswordConfirmPlaceholder')}
+                        />
+                      </label>
+                      <div className="backup-password-footer">
+                        {vaultStatus?.backupPasswordSaved && (
+                          <span className="backup-password-saved-state">
+                            <Check />
+                            {t('settings.storage.backupPasswordStoredOnWindows')}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          className="primary-button backup-password-save"
+                          disabled={isSavingBackupPassword || !portablePassword || !vaultStatus}
+                          onClick={requestBackupPasswordSave}
+                        >
+                          <Save />
+                          {t('settings.storage.backupPasswordSave')}
+                        </button>
+                      </div>
+                    </div>
+                  </SettingRow>
                   <div className="encrypted-backup-card">
                     <div>
                       <strong>{t('settings.storage.backup')}</strong>
@@ -582,6 +689,17 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                       </button>
                     </div>
                   </div>
+                  <VaultSyncPanel
+                    backupPassword={portablePassword}
+                    confirmPassword={portablePasswordConfirm}
+                    onSecretsSaved={() => {
+                      setPortablePassword('');
+                      setPortablePasswordConfirm('');
+                    }}
+                    onRestored={async () => {
+                      await Promise.all([settings.hydrateSettings(), loadHosts()]);
+                    }}
+                  />
                 </div>
               )}
 
@@ -625,6 +743,16 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           </div>
         </section>
       </div>
+      {isBackupPasswordChangePending && (
+        <ConfirmDialog
+          title={t('settings.storage.backupPasswordChangeTitle')}
+          message={t('settings.storage.backupPasswordChangeWarning')}
+          confirmLabel={t('settings.storage.backupPasswordChangeConfirm')}
+          danger
+          onConfirm={() => void persistBackupPassword()}
+          onCancel={() => setIsBackupPasswordChangePending(false)}
+        />
+      )}
     </ModalPortal>
   );
 }

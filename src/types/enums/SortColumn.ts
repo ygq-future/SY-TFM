@@ -3,4 +3,4 @@
 /**
  * 文件列表排序列。
  */
-export type SortColumn = "name" | "size" | "lastModified" | "owner" | "permissions";
+export type SortColumn = 'name' | 'size' | 'lastModified' | 'owner' | 'permissions';

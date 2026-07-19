@@ -24,7 +24,7 @@ export function ConfirmDialog({
   const { t } = useTranslation();
   return (
     <ModalPortal>
-      <div className="modal-backdrop">
+      <div className="modal-backdrop modal-backdrop--dialog">
         <div className="modal-panel compact-modal" role="alertdialog" aria-modal="true">
           <div className="modal-header">
             <div>
@@ -77,7 +77,7 @@ export function AlertDialog({
   const { t } = useTranslation();
   return (
     <ModalPortal>
-      <div className="modal-backdrop">
+      <div className="modal-backdrop modal-backdrop--dialog">
         <div className="modal-panel compact-modal" role="alertdialog" aria-modal="true">
           <div className="modal-header">
             <div>
@@ -134,7 +134,7 @@ export function InputDialog({
 
   return (
     <ModalPortal>
-      <div className="modal-backdrop">
+      <div className="modal-backdrop modal-backdrop--dialog">
         <div className="modal-panel compact-modal" role="dialog" aria-modal="true">
           <div className="modal-header">
             <div>

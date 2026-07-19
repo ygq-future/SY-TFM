@@ -89,6 +89,12 @@ describe('app shell interaction wiring', () => {
     expect(source).toContain("status === 'connecting' || status === 'reconnecting'");
   });
 
+  it('shows the current vault sync state and latest successful time in the status bar', () => {
+    expect(source).toContain('useVaultSyncStore');
+    expect(source).toContain('vault-status-meta');
+    expect(source).toContain('lastSyncedAt');
+  });
+
   it('clears stale operation notices when a newer connection lifecycle starts', () => {
     const browserStore = readFileSync(new URL('./stores/browserStore.ts', import.meta.url), 'utf8');
     expect(browserStore).toContain('clearOperationMessage');

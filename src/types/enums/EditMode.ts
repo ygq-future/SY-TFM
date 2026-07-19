@@ -3,4 +3,4 @@
 /**
  * 远程文件编辑模式。
  */
-export type EditMode = "external" | "online";
+export type EditMode = 'external' | 'online';

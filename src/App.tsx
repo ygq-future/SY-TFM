@@ -61,6 +61,7 @@ import type { RemoteEditSessionInfo } from './types/generated/RemoteEditSessionI
 import { useConnectionStore } from './stores/connectionStore';
 import { createTransferOperationId, useBrowserStore, type PaneIndex } from './stores/browserStore';
 import { useSettingsStore } from './stores/settingsStore';
+import { useVaultSyncStore } from './stores/vaultSyncStore';
 import { HostList } from './features/connection/HostList';
 import { Breadcrumb } from './features/browser/Breadcrumb';
 import {
@@ -799,6 +800,20 @@ function GlobalStatusBar() {
   const { hosts, connectedHostIds, connectionStatus, error } = useConnectionStore();
   const { panes, activePane, transfers, operationMessage, operationIsError, cancelTransfer } =
     useBrowserStore();
+  const { status: vaultStatus, refreshStatus: refreshVaultStatus } = useVaultSyncStore();
+  useEffect(() => {
+    void refreshVaultStatus();
+    const refresh = () => void refreshVaultStatus();
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, [refreshVaultStatus]);
+  useEffect(() => {
+    if (!vaultStatus?.refreshIntervalMs) return;
+    const timer = window.setInterval(() => {
+      void refreshVaultStatus();
+    }, vaultStatus.refreshIntervalMs);
+    return () => window.clearInterval(timer);
+  }, [refreshVaultStatus, vaultStatus?.refreshIntervalMs]);
   const transferList = Object.values(transfers);
   const pane = panes[activePane];
   const paneError = pane.errorMessage;
@@ -892,6 +907,26 @@ function GlobalStatusBar() {
         ))}
       </div>
       <div className="status-meta">
+        {vaultStatus?.configured && (
+          <span className="vault-status-meta">
+            <Cloud />
+            <span>
+              {t(
+                vaultStatus.enabled
+                  ? 'settings.storage.vaultStatusActive'
+                  : vaultStatus.vaultInitialized
+                    ? 'settings.storage.vaultStatusPaused'
+                    : 'settings.storage.vaultStatusSaved',
+              )}
+            </span>
+            <i aria-hidden="true" />
+            <time>
+              {vaultStatus.lastSyncedAt
+                ? new Date(vaultStatus.lastSyncedAt).toLocaleString()
+                : t('settings.storage.vaultNever')}
+            </time>
+          </span>
+        )}
         <span>
           {pane.selectedFiles.length > 0
             ? t('browser.selectedCount', { count: pane.selectedFiles.length })

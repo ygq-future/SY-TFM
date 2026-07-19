@@ -18,6 +18,8 @@ import type { EditorSyncedPayload } from '../types/generated/EditorSyncedPayload
 import type { EditorErrorPayload } from '../types/generated/EditorErrorPayload';
 import type { EditorSessionInvalidPayload } from '../types/generated/EditorSessionInvalidPayload';
 import type { DownloadRequest } from '../types/generated/DownloadRequest';
+import type { VaultSyncStatus } from '../types/generated/VaultSyncStatus';
+import type { VaultWebDavCredentials } from '../types/generated/VaultWebDavCredentials';
 
 // ============================================================
 // 类型定义（对应后端 commands 层返回值）
@@ -299,6 +301,93 @@ export async function exportSettingsEncrypted(filePath: string): Promise<void> {
 /** 导入并解密完整配置。 */
 export async function importSettingsEncrypted(filePath: string): Promise<AppSettings> {
   return invoke<AppSettings>('import_settings_encrypted', { filePath });
+}
+
+/** 获取跨设备保险库同步状态。 */
+export async function getVaultSyncStatus(): Promise<VaultSyncStatus> {
+  return invoke<VaultSyncStatus>('get_vault_sync_status');
+}
+
+/** 验证并保存保险库 WebDAV 配置，不写入远端数据。 */
+export async function testVaultWebDav(
+  credentials: VaultWebDavCredentials,
+  backupPassword?: string,
+): Promise<VaultSyncStatus> {
+  return invoke<VaultSyncStatus>('test_and_save_vault_webdav', {
+    credentials,
+    backupPassword: backupPassword || null,
+  });
+}
+
+/** 校验并保存便携备份与 WebDAV 恢复共用的备份密码。 */
+export async function saveVaultBackupPassword(
+  password: string,
+  confirmation: string,
+): Promise<VaultSyncStatus> {
+  return invoke<VaultSyncStatus>('save_vault_backup_password', { password, confirmation });
+}
+
+/** 创建跨设备保险库并上传至 WebDAV 的 SY-TFM 目录。 */
+export async function enableVaultSync(
+  credentials: VaultWebDavCredentials,
+  backupPassword?: string,
+  overwriteExisting = false,
+): Promise<VaultSyncStatus> {
+  return invoke<VaultSyncStatus>('enable_vault_sync', {
+    credentials,
+    backupPassword: backupPassword || null,
+    overwriteExisting,
+  });
+}
+
+/** 立即上传新的保险库 revision。 */
+export async function syncVaultNow(backupPassword?: string): Promise<VaultSyncStatus> {
+  return invoke<VaultSyncStatus>('sync_vault_now', {
+    backupPassword: backupPassword || null,
+  });
+}
+
+/** 从 WebDAV 的 SY-TFM 目录恢复保险库。 */
+export async function restoreVaultFromWebDav(
+  credentials: VaultWebDavCredentials,
+  backupPassword?: string,
+): Promise<AppSettings> {
+  return invoke<AppSettings>('restore_vault_from_webdav', {
+    credentials,
+    backupPassword: backupPassword || null,
+  });
+}
+
+/** 暂停同步，保留本机凭据、备份密码和云端密文。 */
+export async function pauseVaultSync(): Promise<VaultSyncStatus> {
+  return invoke<VaultSyncStatus>('pause_vault_sync');
+}
+
+/** 恢复已初始化保险库的同步并立即同步当前配置。 */
+export async function resumeVaultSync(): Promise<VaultSyncStatus> {
+  return invoke<VaultSyncStatus>('resume_vault_sync');
+}
+
+/** 导出用户备份密码保护的便携保险库。 */
+export async function exportPortableVault(
+  filePath: string,
+  backupPassword?: string,
+): Promise<void> {
+  await invoke('export_portable_vault', {
+    filePath,
+    backupPassword: backupPassword || null,
+  });
+}
+
+/** 导入便携保险库并转换为当前设备的本地加密。 */
+export async function importPortableVault(
+  filePath: string,
+  backupPassword?: string,
+): Promise<AppSettings> {
+  return invoke<AppSettings>('import_portable_vault', {
+    filePath,
+    backupPassword: backupPassword || null,
+  });
 }
 
 /** 获取当前平台解析后的默认下载和应用数据目录。 */

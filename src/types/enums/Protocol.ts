@@ -8,4 +8,4 @@
  * 2. 在 `transport/` 目录新建 adapter 文件；
  * 3. 在 `create_adapter()` 工厂函数注册。
  */
-export type Protocol = "sftp" | "webdav" | "ftp" | "s3" | "scp";
+export type Protocol = 'sftp' | 'webdav' | 'ftp' | 's3' | 'scp';

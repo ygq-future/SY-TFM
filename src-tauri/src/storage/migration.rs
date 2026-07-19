@@ -117,6 +117,7 @@ pub fn migrate_v1_to_v3(old_path: &Path, _new_path: &Path) -> Result<AppSettings
         background_opacity: 0.3,
         glass_blur: 22.0,
         glass_opacity: 0.72,
+        vault_sync: crate::models::VaultSyncSettings::default(),
         config_version: 3,
     };
 

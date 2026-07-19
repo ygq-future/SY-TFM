@@ -3,4 +3,4 @@
 /**
  * WebDAV 连接使用的 HTTP scheme。
  */
-export type HttpScheme = "http" | "https";
+export type HttpScheme = 'http' | 'https';

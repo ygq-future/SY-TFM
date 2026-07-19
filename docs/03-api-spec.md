@@ -809,6 +809,67 @@ invoke('import_config', {
 
 ---
 
+### 7.7 get_vault_sync_status
+
+获取当前设备的跨设备保险库状态、云端固定路径、revision 与解锁状态。
+
+### 7.8 enable_vault_sync
+
+```typescript
+invoke('enable_vault_sync', { credentials, backupPassword, overwriteExisting: false })
+```
+
+首次创建 `vault.v1` 并上传到 WebDAV `/SY-TFM/sy-tfm-vault.sytfm`。如果云端已存在保险库且
+`overwriteExisting` 为 `false`，返回 `sync_conflict` 供前端二次确认；仅在用户确认后以
+`overwriteExisting: true` 重试并覆盖云端旧备份。
+
+### 7.8.1 test_and_save_vault_webdav
+
+```typescript
+invoke('test_and_save_vault_webdav', { credentials, backupPassword?: string })
+```
+
+验证并在本机加密保存 WebDAV 地址、凭据和可选的共用备份密码；不创建 `SY-TFM` 目录，也不上传或修改远端数据。
+
+### 7.8.2 save_vault_backup_password
+
+```typescript
+invoke('save_vault_backup_password', { password, confirmation })
+```
+
+校验两次输入一致且不少于 8 个字符，然后以当前设备主密钥加密保存共用备份密码。若已有 Vault，则只在本机重新包装 Vault Key；已有便携备份继续使用旧密码，WebDAV 在下一次同步时才切换到新密码。
+
+### 7.9 sync_vault_now
+
+```typescript
+invoke('sync_vault_now', { backupPassword?: string })
+```
+
+使用当前设备缓存的 Vault Key 上传下一 revision；未缓存时可传入备份密码解锁。云端 revision 更新时返回 `SyncConflict`。
+
+### 7.10 restore_vault_from_webdav
+
+```typescript
+invoke('restore_vault_from_webdav', { credentials, backupPassword })
+```
+
+下载云端 Vault、验证备份密码，恢复全部配置和背景图片，并使用当前设备系统主密钥重新加密所有已保存密码。
+
+### 7.11 pause_vault_sync / resume_vault_sync
+
+暂停仅关闭自动同步，保留本机 WebDAV 凭据、共用备份密码、Vault Key、revision 与云端文件；恢复同步后立即上传当前配置。
+
+### 7.12 export_portable_vault / import_portable_vault
+
+```typescript
+invoke('export_portable_vault', { filePath, backupPassword })
+invoke('import_portable_vault', { filePath, backupPassword })
+```
+
+导出或导入用户备份密码保护的便携 `.sytfm` 文件，不依赖原设备 Credential Manager。未传密码时复用本机已加密保存的共用备份密码。
+
+---
+
 ## 8. 主机管理接口
 
 ### 8.1 get_hosts
@@ -1094,3 +1155,6 @@ interface BatchProgressPayload {
 | `OperationCancelled` | `"operation_cancelled"` | 操作被取消 | 静默处理 |
 | `OperationTimeout` | `"operation_timeout"` | 操作超时 | 重试 |
 | `PlatformUnsupported` | `"platform_unsupported"` | 平台不支持 | 隐藏对应功能 |
+| `VaultLocked` | `"vault_locked"` | 当前设备尚未解锁 Vault Key | 要求输入备份密码或执行云端恢复 |
+| `SyncConflict` | `"sync_conflict"` | 云端存在更新或其他保险库 | 先恢复并确认版本，不静默覆盖 |
+| `InvalidBackup` | `"invalid_backup"` | Vault 格式无效、超限或已损坏 | 停止导入并检查备份来源 |

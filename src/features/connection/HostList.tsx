@@ -133,6 +133,7 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
     y: number;
   } | null>(null);
   const [tagFilter, setTagFilter] = useState('');
+  const [suppressAllActions, setSuppressAllActions] = useState(false);
   const [suppressedActionsHostId, setSuppressedActionsHostId] = useState<string | null>(null);
   const hostSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -141,6 +142,13 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
   useEffect(() => {
     void loadHosts();
   }, [loadHosts]);
+
+  useEffect(() => {
+    if (!suppressAllActions) return;
+    const releaseSuppression = () => setSuppressAllActions(false);
+    window.addEventListener('pointermove', releaseSuppression, { once: true });
+    return () => window.removeEventListener('pointermove', releaseSuppression);
+  }, [suppressAllActions]);
 
   const tags = useMemo(
     () =>
@@ -215,7 +223,7 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
     }
   };
   const handleHostDragEnd = (event: DragEndEvent) => {
-    setSuppressedActionsHostId(String(event.active.id));
+    setSuppressAllActions(true);
     const targetId = event.over?.id;
     if (!targetId || event.active.id === targetId) return;
     void reorderHosts(String(event.active.id), String(targetId)).catch(() => undefined);
@@ -252,7 +260,7 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
         autoScroll={false}
         collisionDetection={closestCenter}
         modifiers={[restrictToVerticalAxis]}
-        onDragCancel={() => setSuppressedActionsHostId(null)}
+        onDragCancel={() => setSuppressAllActions(false)}
         onDragEnd={handleHostDragEnd}
       >
         <SortableContext
@@ -287,9 +295,12 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
                     key={host.id}
                     hostId={host.id}
                     disabled={isReordering}
-                    suppressActions={suppressedActionsHostId === host.id}
+                    suppressActions={suppressAllActions || suppressedActionsHostId === host.id}
                     className={cn('sidebar-host-row', isSelected && 'sidebar-host-row--selected')}
-                    onClick={() => selectHost(host.id)}
+                    onClick={() => {
+                      setSuppressedActionsHostId(host.id);
+                      selectHost(host.id);
+                    }}
                     onDoubleClick={() => {
                       if (isConnected) onSelectHost(host.id);
                       else handleConnect(host);
@@ -320,6 +331,7 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
                         title={t('common.edit')}
                         onClick={(event) => {
                           event.stopPropagation();
+                          setSuppressedActionsHostId(host.id);
                           openEditDialog(host);
                         }}
                       >
@@ -331,6 +343,7 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
                           title={t('common.disconnect')}
                           onClick={(event) => {
                             event.stopPropagation();
+                            setSuppressedActionsHostId(host.id);
                             void disconnectHost(host.id);
                           }}
                         >
@@ -342,6 +355,7 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
                           title={t('common.connect')}
                           onClick={(event) => {
                             event.stopPropagation();
+                            setSuppressedActionsHostId(host.id);
                             handleConnect(host);
                           }}
                         >
@@ -353,6 +367,7 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
                         title={t('common.delete')}
                         onClick={(event) => {
                           event.stopPropagation();
+                          setSuppressedActionsHostId(host.id);
                           setPendingDeleteHost(host);
                         }}
                       >

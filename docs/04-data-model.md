@@ -803,6 +803,34 @@ enc.v1:<Base64(nonce || ciphertext || tag)>
 | iOS | Keychain (kSecClassGenericPassword) | 原始 32 字节 |
 | Android | Keystore (AndroidKeyStore) | 密钥不导出，通过 API 使用 |
 
+### 6.3 Portable Vault v1
+
+```json
+{
+  "format": "vault.v1",
+  "vaultId": "uuid",
+  "revision": 3,
+  "updatedAt": "2026-07-18T12:00:00Z",
+  "keyEnvelope": {
+    "kdf": {
+      "salt": "Base64",
+      "memoryKib": 65536,
+      "iterations": 3,
+      "parallelism": 1
+    },
+    "nonce": "Base64",
+    "ciphertext": "Base64 wrapped Vault Key"
+  },
+  "payloadNonce": "Base64",
+  "ciphertext": "Base64 encrypted portable settings"
+}
+```
+
+`keyEnvelope` 允许用户更换设备后用备份密码解锁同一个 Vault Key；载荷认证数据绑定 `vaultId + revision`，篡改 metadata 会导致解密失败。
+本地 `VaultSyncSettings.password` 保存的是设备绑定 `enc.v1` WebDAV 密码，不会写入便携载荷。
+解密后的载荷包含完整 `AppSettings`，并可选附带 `{ fileName, dataBase64 }` 背景图片。图片和全部配置位于同一个 AES-256-GCM 密文中，恢复时图片会落盘到当前设备应用数据目录的 `backgrounds` 子目录。
+`VaultSyncSettings.backupPassword` 是便携导出与 WebDAV 共用的备份密码，只以当前设备 `enc.v1` 密文保存在 `settings.json`，不会进入便携载荷。`enabled=false` 表示暂停而非解绑，其余同步字段必须原样保留。
+
 ---
 
 ## 7. 配置文件 Schema

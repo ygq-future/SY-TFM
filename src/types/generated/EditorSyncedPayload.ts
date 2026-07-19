@@ -3,20 +3,21 @@
 /**
  * 外部编辑器文件同步成功事件。
  */
-export type EditorSyncedPayload = { 
-/**
- * 主机 ID。
- */
-hostId: string, 
-/**
- * 远程路径。
- */
-filePath: string, 
-/**
- * 文件名。
- */
-fileName: string, 
-/**
- * 本地格式化的同步时间。
- */
-syncTime: string, };
+export type EditorSyncedPayload = {
+  /**
+   * 主机 ID。
+   */
+  hostId: string;
+  /**
+   * 远程路径。
+   */
+  filePath: string;
+  /**
+   * 文件名。
+   */
+  fileName: string;
+  /**
+   * 本地格式化的同步时间。
+   */
+  syncTime: string;
+};

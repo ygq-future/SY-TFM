@@ -42,4 +42,9 @@ fn export_all_types() {
     EditorSyncedPayload::export_all().unwrap();
     EditorErrorPayload::export_all().unwrap();
     EditorSessionInvalidPayload::export_all().unwrap();
+    VaultKdfParameters::export_all().unwrap();
+    VaultKeyEnvelope::export_all().unwrap();
+    VaultSyncSettings::export_all().unwrap();
+    VaultSyncStatus::export_all().unwrap();
+    VaultWebDavCredentials::export_all().unwrap();
 }

@@ -10,6 +10,8 @@ use aes_gcm::aead::{rand_core::RngCore, OsRng};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use keyring::Entry;
 
+use crate::enums::vault_policy::VAULT_KEY_BYTES;
+use crate::enums::vault_resource::VaultResource;
 use crate::enums::ErrorCode;
 use crate::error::AppError;
 
@@ -60,18 +62,68 @@ pub fn get_or_create_master_key() -> Result<[u8; KEY_LEN], AppError> {
     }
 }
 
-/// 解码并校验平台凭据存储中的主密钥。
-fn decode_master_key(stored: &str) -> Result<[u8; KEY_LEN], AppError> {
-    let key_bytes = STANDARD
-        .decode(stored.as_bytes())
-        .map_err(|e| AppError::new(ErrorCode::CryptoDecryptFailed, e.to_string()))?;
-    if key_bytes.len() != KEY_LEN {
+/// 读取当前设备缓存的跨设备 Vault Key。
+pub fn get_vault_key() -> Result<Option<[u8; VAULT_KEY_BYTES]>, AppError> {
+    let entry = Entry::new(KEYRING_SERVICE, VaultResource::KeyringAccount.as_str())
+        .map_err(|error| AppError::new(ErrorCode::PlatformUnsupported, error.to_string()))?;
+    match entry.get_password() {
+        Ok(stored) => decode_fixed_key::<VAULT_KEY_BYTES>(&stored).map(Some),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(AppError::new(
+            ErrorCode::PlatformUnsupported,
+            format!("Vault Key 读取失败: {error}"),
+        )),
+    }
+}
+
+/// 将跨设备 Vault Key 缓存在当前设备的系统凭据库中。
+pub fn store_vault_key(key: &[u8; VAULT_KEY_BYTES]) -> Result<(), AppError> {
+    let entry = Entry::new(KEYRING_SERVICE, VaultResource::KeyringAccount.as_str())
+        .map_err(|error| AppError::new(ErrorCode::PlatformUnsupported, error.to_string()))?;
+    entry
+        .set_password(&STANDARD.encode(key))
+        .map_err(|error| AppError::new(ErrorCode::PlatformUnsupported, error.to_string()))?;
+    let persisted = entry
+        .get_password()
+        .map_err(|error| AppError::new(ErrorCode::PlatformUnsupported, error.to_string()))?;
+    if decode_fixed_key::<VAULT_KEY_BYTES>(&persisted)? != *key {
         return Err(AppError::new(
-            ErrorCode::CryptoDecryptFailed,
-            format!("主密钥长度异常: {} != {KEY_LEN}", key_bytes.len()),
+            ErrorCode::CryptoEncryptFailed,
+            "系统凭据库未能稳定保存 Vault Key",
         ));
     }
-    let mut key = [0u8; KEY_LEN];
+    Ok(())
+}
+
+/// 从当前设备的系统凭据库移除 Vault Key。
+pub fn delete_vault_key() -> Result<(), AppError> {
+    let entry = Entry::new(KEYRING_SERVICE, VaultResource::KeyringAccount.as_str())
+        .map_err(|error| AppError::new(ErrorCode::PlatformUnsupported, error.to_string()))?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(AppError::new(
+            ErrorCode::PlatformUnsupported,
+            format!("Vault Key 删除失败: {error}"),
+        )),
+    }
+}
+
+/// 解码并校验平台凭据存储中的主密钥。
+fn decode_master_key(stored: &str) -> Result<[u8; KEY_LEN], AppError> {
+    decode_fixed_key::<KEY_LEN>(stored)
+}
+
+fn decode_fixed_key<const N: usize>(stored: &str) -> Result<[u8; N], AppError> {
+    let key_bytes = STANDARD
+        .decode(stored.as_bytes())
+        .map_err(|error| AppError::new(ErrorCode::CryptoDecryptFailed, error.to_string()))?;
+    if key_bytes.len() != N {
+        return Err(AppError::new(
+            ErrorCode::CryptoDecryptFailed,
+            format!("密钥长度异常: {} != {N}", key_bytes.len()),
+        ));
+    }
+    let mut key = [0_u8; N];
     key.copy_from_slice(&key_bytes);
     Ok(key)
 }

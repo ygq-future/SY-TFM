@@ -4,6 +4,7 @@ use ts_rs::TS;
 use crate::enums::{Language, Theme};
 
 use super::remote_host::RemoteHost;
+use super::vault_sync::VaultSyncSettings;
 
 /// 应用配置（settings.json 的内存表示）。
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -61,6 +62,9 @@ pub struct AppSettings {
     /// 全局毛玻璃表面不透明度。
     #[serde(default = "default_glass_opacity")]
     pub glass_opacity: f64,
+    /// 跨设备加密保险库与 WebDAV 同步配置。
+    #[serde(default)]
+    pub vault_sync: VaultSyncSettings,
     /// 配置版本号（用于迁移）
     #[serde(default = "default_config_version")]
     pub config_version: u32,
@@ -151,6 +155,7 @@ impl Default for AppSettings {
             background_opacity: default_bg_opacity(),
             glass_blur: default_glass_blur(),
             glass_opacity: default_glass_opacity(),
+            vault_sync: VaultSyncSettings::default(),
             config_version: default_config_version(),
         }
     }

@@ -3,4 +3,4 @@
 /**
  * 主题模式。
  */
-export type Theme = "light" | "dark" | "system";
+export type Theme = 'light' | 'dark' | 'system';

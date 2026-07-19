@@ -26,7 +26,8 @@ use crate::error::AppError;
 use crate::local_fs::{reject_existing_local_link, safe_local_child};
 use crate::models::{
     AppSettings, BatchProgressPayload, ConnectionStatusPayload, DownloadRequest, HostDto,
-    ProgressPayload, RemoteEditSessionInfo, RemoteFile, RemoteHost,
+    ProgressPayload, RemoteEditSessionInfo, RemoteFile, RemoteHost, VaultSyncStatus,
+    VaultWebDavCredentials,
 };
 use crate::storage::SettingsService;
 use crate::transport::ProgressEvent;
@@ -1194,7 +1195,9 @@ pub fn load_settings() -> Result<AppSettings, AppError> {
 /// 保存应用配置。
 #[tauri::command]
 pub fn save_settings(settings: AppSettings) -> Result<(), AppError> {
-    SettingsService::save(&settings)
+    SettingsService::save(&settings)?;
+    crate::core::vault_sync::schedule_auto_sync();
+    Ok(())
 }
 
 /// 将完整配置加密导出到指定文件。
@@ -1230,6 +1233,85 @@ pub fn import_settings_encrypted(file_path: String) -> Result<AppSettings, AppEr
     settings.config_version = 3;
     SettingsService::save(&settings)?;
     Ok(settings)
+}
+
+/// 获取跨设备保险库的 WebDAV 同步状态。
+#[tauri::command]
+pub fn get_vault_sync_status() -> Result<VaultSyncStatus, AppError> {
+    crate::core::vault_sync::status()
+}
+
+/// 首次创建跨设备保险库并上传至 WebDAV 的固定 `SY-TFM` 目录。
+#[tauri::command]
+pub async fn enable_vault_sync(
+    credentials: VaultWebDavCredentials,
+    backup_password: Option<String>,
+    overwrite_existing: bool,
+) -> Result<VaultSyncStatus, AppError> {
+    crate::core::vault_sync::enable(credentials, backup_password, overwrite_existing).await
+}
+
+/// 验证并保存保险库使用的 WebDAV 地址、凭据与可选共用备份密码。
+#[tauri::command]
+pub async fn test_and_save_vault_webdav(
+    credentials: VaultWebDavCredentials,
+    backup_password: Option<String>,
+) -> Result<VaultSyncStatus, AppError> {
+    crate::core::vault_sync::test_and_save(credentials, backup_password).await
+}
+
+/// 校验并保存便携备份与 WebDAV 恢复共用的备份密码。
+#[tauri::command]
+pub async fn save_vault_backup_password(
+    password: String,
+    confirmation: String,
+) -> Result<VaultSyncStatus, AppError> {
+    crate::core::vault_sync::save_backup_password(password, confirmation).await
+}
+
+/// 立即把当前设置上传为新的保险库 revision。
+#[tauri::command]
+pub async fn sync_vault_now(backup_password: Option<String>) -> Result<VaultSyncStatus, AppError> {
+    crate::core::vault_sync::sync_now(backup_password).await
+}
+
+/// 从 WebDAV 的固定 `SY-TFM` 目录恢复跨设备保险库。
+#[tauri::command]
+pub async fn restore_vault_from_webdav(
+    credentials: VaultWebDavCredentials,
+    backup_password: Option<String>,
+) -> Result<AppSettings, AppError> {
+    crate::core::vault_sync::restore(credentials, backup_password).await
+}
+
+/// 暂停当前设备的保险库同步，保留本机配置和云端加密文件。
+#[tauri::command]
+pub async fn pause_vault_sync() -> Result<VaultSyncStatus, AppError> {
+    crate::core::vault_sync::pause().await
+}
+
+/// 恢复已初始化保险库的同步。
+#[tauri::command]
+pub async fn resume_vault_sync() -> Result<VaultSyncStatus, AppError> {
+    crate::core::vault_sync::resume().await
+}
+
+/// 导出可通过用户备份密码在其他设备解密的便携保险库。
+#[tauri::command]
+pub fn export_portable_vault(
+    file_path: String,
+    backup_password: Option<String>,
+) -> Result<(), AppError> {
+    crate::core::vault_sync::export_file(file_path, backup_password)
+}
+
+/// 导入便携保险库，并使用当前设备的系统主密钥重新保护主机密码。
+#[tauri::command]
+pub fn import_portable_vault(
+    file_path: String,
+    backup_password: Option<String>,
+) -> Result<AppSettings, AppError> {
+    crate::core::vault_sync::import_file(file_path, backup_password)
 }
 
 /// 获取当前平台解析后的默认下载与应用数据目录。
@@ -1306,7 +1388,9 @@ pub fn get_font_size() -> Result<u8, AppError> {
 pub fn set_font_size(font_size: u8) -> Result<(), AppError> {
     let mut settings = SettingsService::load()?;
     settings.font_size = font_size.clamp(10, 18);
-    SettingsService::save(&settings)
+    SettingsService::save(&settings)?;
+    crate::core::vault_sync::schedule_auto_sync();
+    Ok(())
 }
 
 /// 获取主机列表。
@@ -1370,7 +1454,9 @@ pub fn save_host(host: RemoteHost, clear_password: Option<bool>) -> Result<(), A
     } else {
         settings.hosts.push(host);
     }
-    SettingsService::save(&settings)
+    SettingsService::save(&settings)?;
+    crate::core::vault_sync::schedule_auto_sync();
+    Ok(())
 }
 
 fn reorder_hosts_in_memory(
@@ -1411,7 +1497,9 @@ pub fn reorder_hosts(host_ids: Vec<String>) -> Result<(), AppError> {
         .collect::<Result<Vec<_>, _>>()?;
     let mut settings = SettingsService::load()?;
     settings.hosts = reorder_hosts_in_memory(&settings.hosts, &host_ids)?;
-    SettingsService::save(&settings)
+    SettingsService::save(&settings)?;
+    crate::core::vault_sync::schedule_auto_sync();
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1600,7 +1688,9 @@ pub fn delete_host(host_id: String) -> Result<(), AppError> {
     let uuid = parse_uuid(&host_id)?;
     let mut settings = SettingsService::load()?;
     settings.hosts.retain(|h| h.id != uuid);
-    SettingsService::save(&settings)
+    SettingsService::save(&settings)?;
+    crate::core::vault_sync::schedule_auto_sync();
+    Ok(())
 }
 
 /// 导出主机配置（不含密码）。
@@ -1632,5 +1722,7 @@ pub fn import_hosts(hosts: Vec<HostDto>) -> Result<(), AppError> {
         };
         settings.hosts.push(host);
     }
-    SettingsService::save(&settings)
+    SettingsService::save(&settings)?;
+    crate::core::vault_sync::schedule_auto_sync();
+    Ok(())
 }

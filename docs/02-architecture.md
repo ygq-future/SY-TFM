@@ -1267,6 +1267,22 @@ React Component (自动重渲染)
 | iOS | iOS Keychain (kSecAttrAccessibleWhenUnlocked) | Tauri iOS 原生支持 |
 | Android | Android Keystore | 使用 KeyStore API |
 
+### 8.3 跨设备加密保险库
+
+本机 `settings.json` 继续使用设备绑定的 `enc.v1` 和平台凭据库；跨设备备份不会复制该密文，
+而是在内存中解密主机密码后写入独立的 `vault.v1` 载荷：
+
+1. 随机生成 256 位 Vault Key，并使用 AES-256-GCM 加密便携设置载荷；
+2. 用户备份密码通过 Argon2id（64 MiB、3 次迭代）派生包装密钥，仅用于保护 Vault Key；
+3. 当前设备可将解锁后的 Vault Key 缓存在 Credential Manager/Keychain/Keystore；
+4. 新设备输入备份密码解锁 Vault，恢复后再由新设备主密钥生成自己的 `enc.v1`；
+5. WebDAV 同步仅经 `FileTransport` trait 调度，固定写入 `/SY-TFM/sy-tfm-vault.sytfm`；
+6. Vault ID + 单调 revision 阻止已知的跨设备旧版本静默覆盖。
+
+便携载荷包含完整应用配置、主机配置、信任记录和下载/数据目录设置。本地背景图片会以 Base64 字节随载荷一起加密，恢复时写入当前设备应用数据目录；WebDAV 凭据本身仍由本机系统主密钥保护。
+便携导出和 WebDAV 使用同一份备份密码；该密码与 WebDAV 密码一样仅以设备绑定的 `enc.v1` 保存。暂停同步只切换 `enabled=false`，不得清除凭据、Vault Key、revision 或最近同步时间。
+更换备份密码时，当前设备使用新密码重新包装既有 Vault Key，但不静默重写远端；已有便携备份仍由旧密码保护，WebDAV 在用户下一次明确同步时随新 revision 切换到新的密钥信封。
+
 ---
 
 ## 9. 跨平台适配策略

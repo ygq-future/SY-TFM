@@ -24,6 +24,15 @@ describe('host list ordering controls', () => {
     expect(source).not.toContain('dropIndicator');
     expect(css).toMatch(/\.host-sidebar-list\s*\{[^}]*overflow-x:\s*hidden/s);
     expect(css).toContain('.sidebar-host-row--actions-suppressed');
+    expect(source).toContain('suppressAllActions');
+    expect(source).toContain('suppressedActionsHostId');
+    expect(source).toContain('onPointerLeave');
+    expect(source).toContain('setSuppressedActionsHostId(host.id)');
+    expect(source).toContain("window.addEventListener('pointermove'");
+    expect(css).toContain(
+      '.sidebar-host-row:not(.sidebar-host-row--actions-suppressed):not(.sidebar-host-row--dragging):hover',
+    );
+    expect(css).not.toContain('.sidebar-host-row:focus-within .sidebar-host-actions');
   });
 
   it('keeps ordering exclusively on vertical drag without duplicate arrow controls', () => {

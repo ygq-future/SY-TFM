@@ -3,4 +3,5 @@
 /**
  * 连接状态。
  */
-export type ConnectionStatus = "connecting" | "connected" | "disconnecting" | "disconnected" | "reconnecting" | "error";
+export type ConnectionStatus =
+  'connecting' | 'connected' | 'disconnecting' | 'disconnected' | 'reconnecting' | 'error';

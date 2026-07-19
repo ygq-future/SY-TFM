@@ -2068,6 +2068,275 @@ textarea,
   }
 }
 
+/* Cross-device vault keeps dense storage controls readable inside the glass settings surface. */
+.vault-sync-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--accent-strong) 20%, var(--glass-border));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel-surface) 74%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 8%, transparent);
+}
+
+.vault-card-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.vault-card-heading strong {
+  font-size: var(--type-label-size);
+  color: var(--app-ink);
+}
+
+.vault-card-heading p,
+.vault-security-note {
+  margin: 3px 0 0;
+  font-size: var(--type-caption-size);
+  line-height: 1.45;
+  color: var(--app-muted);
+}
+
+.vault-state {
+  padding: 4px 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  font-size: var(--type-caption-size);
+  color: var(--app-muted);
+  background: color-mix(in srgb, var(--panel-surface) 78%, transparent);
+}
+
+.vault-state--active {
+  border-color: color-mix(in srgb, var(--accent-strong) 42%, transparent);
+  color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent-soft) 46%, transparent);
+}
+
+.vault-form-grid,
+.shared-backup-passwords {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.vault-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.vault-field--wide {
+  grid-column: 1 / -1;
+}
+
+.vault-field > span {
+  font-size: var(--type-caption-size);
+  font-weight: 650;
+  color: var(--app-muted);
+}
+
+.vault-field input {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 11px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  color: var(--app-ink);
+  background: color-mix(in srgb, var(--input-surface, var(--panel-surface)) 82%, transparent);
+  outline: none;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    background-color 140ms ease;
+}
+
+.vault-field input:focus {
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-strong) 16%, transparent);
+}
+
+.vault-security-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent-soft) 28%, transparent);
+}
+
+.vault-security-note svg {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  color: var(--accent-strong);
+}
+
+.vault-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 0;
+}
+
+.vault-summary div {
+  min-width: 0;
+}
+
+.vault-summary dt {
+  margin-bottom: 3px;
+  font-size: var(--type-caption-size);
+  color: var(--app-muted);
+}
+
+.vault-summary dd {
+  overflow: hidden;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--type-data-size);
+  color: var(--app-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-actions {
+  justify-content: flex-end;
+}
+
+.vault-actions:has(.vault-action-button) {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.vault-actions .vault-action-button {
+  width: auto;
+  min-width: 0;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.vault-status-meta {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  color: var(--app-muted);
+  white-space: nowrap;
+}
+
+.vault-status-meta > span,
+.vault-status-meta > time {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vault-status-meta > time {
+  flex: 0 1 auto;
+}
+
+.vault-status-meta svg {
+  width: 12px;
+  height: 12px;
+  color: var(--accent-strong);
+}
+
+.vault-status-meta i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+}
+
+.shared-backup-passwords {
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+}
+
+.setting-row.setting-row--backup-password {
+  grid-template-columns: 1fr;
+  gap: 12px;
+  padding: 14px;
+}
+
+.setting-row--backup-password .setting-control,
+.backup-password-field {
+  min-width: 0;
+}
+
+.backup-password-footer {
+  grid-column: 1 / -1;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.backup-password-saved-state {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--success);
+  font-size: var(--type-caption-size);
+  line-height: 1.35;
+}
+
+.backup-password-saved-state svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.shared-backup-passwords .backup-password-save {
+  flex: 0 0 auto;
+  min-width: 96px;
+  height: 36px;
+  justify-content: center;
+  padding-inline: 12px;
+}
+
+@media (max-width: 820px) {
+  .vault-form-grid,
+  .vault-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .vault-field--wide {
+    grid-column: auto;
+  }
+
+  .vault-card-heading {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .vault-state {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .vault-actions:has(.vault-action-button) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .shared-backup-passwords {
+    grid-template-columns: 1fr;
+  }
+
+  .backup-password-footer {
+    align-items: flex-end;
+  }
+}
+
 /* Native file-manager selection rules also cover body-mounted portals. */
 body {
   user-select: none;
@@ -2476,8 +2745,12 @@ body {
   background: var(--accent-soft);
 }
 
-.sidebar-host-row:hover .sidebar-host-actions,
-.sidebar-host-row:focus-within .sidebar-host-actions {
+.sidebar-host-row:not(.sidebar-host-row--actions-suppressed):not(.sidebar-host-row--dragging):hover
+  .sidebar-host-actions,
+.sidebar-host-row:not(.sidebar-host-row--actions-suppressed):not(.sidebar-host-row--dragging):has(
+    .sidebar-host-actions button:focus-visible
+  )
+  .sidebar-host-actions {
   opacity: 1;
 }
 
@@ -5598,6 +5871,11 @@ textarea,
   place-items: center;
 }
 
+/* Body-portaled dialogs must remain above parent surfaces such as Settings. */
+.modal-backdrop--dialog {
+  z-index: 320;
+}
+
 .settings-panel {
   width: min(440px, calc(100vw - 28px));
   overflow: hidden;
@@ -7383,5 +7661,39 @@ html[data-theme='dark'] .settings-panel {
 @media (prefers-reduced-motion: reduce) {
   .sidebar-host-row {
     transition: none;
+  }
+}
+
+/* Vault controls remain authoritative over every legacy settings layer. */
+.encrypted-backup-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  border-color: var(--glass-line-soft);
+  background: color-mix(in srgb, var(--settings-surface) 78%, transparent);
+}
+
+.encrypted-backup-card > .settings-button-row {
+  flex: 0 0 auto;
+}
+
+.vault-field input {
+  height: 36px;
+  border: 1px solid var(--glass-line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--settings-surface) 70%, transparent);
+  padding: 0 11px;
+}
+
+.vault-field input:focus {
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-strong) 16%, transparent);
+}
+
+@media (max-width: 820px) {
+  .encrypted-backup-card {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
