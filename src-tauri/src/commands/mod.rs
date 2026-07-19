@@ -1330,6 +1330,7 @@ pub fn get_storage_paths() -> Result<crate::models::StoragePaths, AppError> {
         default_data_path: SettingsService::default_data_dir()?
             .to_string_lossy()
             .into_owned(),
+        portable_mode: crate::storage::portable_mode::portable_data_dir()?.is_some(),
     })
 }
 

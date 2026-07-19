@@ -25,12 +25,25 @@ pub mod transport;
 
 use core::{EditSessionManager, SessionManager, TransferManager};
 
+#[cfg(desktop)]
+use tauri::Manager;
+
 /// 启动 Tauri 应用：组装命令并运行事件循环。
 ///
 /// 失败时打印错误而非 panic（遵循 AGENTS.md「禁止非测试 unwrap/expect」）。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let result = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }));
+
+    let result = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(SessionManager::new())

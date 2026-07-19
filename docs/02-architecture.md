@@ -88,6 +88,7 @@
 | UUID | uuid | 1 | 唯一 ID |
 | 配置目录 | directories | 6 | AppData / ~/.config |
 | 高性能锁 | parking_lot | 0.12 | Mutex / RwLock |
+| 桌面单实例 | tauri-plugin-single-instance | 2.4 | 重复启动时激活既有主窗口 |
 
 > **注意：** FTP/FTPS adapter 不在首版范围。后续添加时引入 `suppaftp` crate，封装为 `FtpAdapter`，不影响现有代码。
 

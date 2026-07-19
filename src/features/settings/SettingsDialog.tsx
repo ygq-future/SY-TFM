@@ -40,6 +40,7 @@ import type { StoragePaths } from '../../types/generated/StoragePaths';
 import { formatAppError } from '../../lib/errors';
 import { VaultSyncPanel } from './VaultSyncPanel';
 import { useVaultSyncStore } from '../../stores/vaultSyncStore';
+import { reviewBackupPassword } from './backupPasswordReview';
 
 type SettingsSection = 'general' | 'appearance' | 'storage' | 'about';
 
@@ -130,7 +131,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [portablePassword, setPortablePassword] = useState('');
   const [portablePasswordConfirm, setPortablePasswordConfirm] = useState('');
   const [isSavingBackupPassword, setIsSavingBackupPassword] = useState(false);
-  const [isBackupPasswordChangePending, setIsBackupPasswordChangePending] = useState(false);
+  const [isBackupPasswordReviewPending, setIsBackupPasswordReviewPending] = useState(false);
+  const backupPasswordReview = reviewBackupPassword(portablePassword);
 
   useEffect(() => {
     void getStoragePaths()
@@ -238,7 +240,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   };
 
   const persistBackupPassword = async () => {
-    setIsBackupPasswordChangePending(false);
+    setIsBackupPasswordReviewPending(false);
     setIsSavingBackupPassword(true);
     try {
       await saveVaultBackupPassword(portablePassword, portablePasswordConfirm);
@@ -250,7 +252,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       toast.error(t('settings.storage.backupPasswordSaveFailed'));
     } finally {
       setIsSavingBackupPassword(false);
-      setIsBackupPasswordChangePending(false);
+      setIsBackupPasswordReviewPending(false);
     }
   };
 
@@ -263,11 +265,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       toast.error(t('settings.storage.vaultPasswordMismatch'));
       return;
     }
-    if (vaultStatus?.backupPasswordSaved) {
-      setIsBackupPasswordChangePending(true);
-      return;
-    }
-    void persistBackupPassword();
+    setIsBackupPasswordReviewPending(true);
   };
 
   return (
@@ -597,12 +595,17 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   </SettingRow>
                   <SettingRow
                     title={t('settings.storage.dataPath')}
-                    hint={t('settings.storage.dataHint')}
+                    hint={
+                      storagePaths?.portableMode
+                        ? t('settings.storage.portableDataHint')
+                        : t('settings.storage.dataHint')
+                    }
                     icon={<Database />}
                   >
                     <div className="path-setting">
                       <input
                         value={dataPathDraft}
+                        disabled={storagePaths?.portableMode}
                         onChange={(event) => setDataPathDraft(event.target.value)}
                         onBlur={() =>
                           settings.setDefaultDataPath(
@@ -612,7 +615,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                           )
                         }
                       />
-                      <button type="button" onClick={() => void chooseDirectory('data')}>
+                      <button
+                        type="button"
+                        disabled={storagePaths?.portableMode}
+                        onClick={() => void chooseDirectory('data')}
+                      >
                         <FolderOpen />
                       </button>
                     </div>
@@ -743,14 +750,60 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           </div>
         </section>
       </div>
-      {isBackupPasswordChangePending && (
+      {isBackupPasswordReviewPending && (
         <ConfirmDialog
-          title={t('settings.storage.backupPasswordChangeTitle')}
-          message={t('settings.storage.backupPasswordChangeWarning')}
-          confirmLabel={t('settings.storage.backupPasswordChangeConfirm')}
-          danger
+          title={t('settings.storage.backupPasswordReviewTitle')}
+          message={
+            <div className="backup-password-review">
+              <p>{t('settings.storage.backupPasswordReviewIntro')}</p>
+              <div className="backup-password-review-card">
+                <span>{t('settings.storage.backupPasswordReviewExact')}</span>
+                <div className="backup-password-review-value">
+                  <i aria-hidden="true">“</i>
+                  <code>{backupPasswordReview.raw}</code>
+                  <i aria-hidden="true">”</i>
+                </div>
+                <div className="backup-password-review-meta">
+                  <span>
+                    {t('settings.storage.backupPasswordReviewCharacters', {
+                      count: backupPasswordReview.characterCount,
+                    })}
+                  </span>
+                  <span>
+                    {t('settings.storage.backupPasswordReviewWhitespace', {
+                      count: backupPasswordReview.whitespaceCount,
+                    })}
+                  </span>
+                </div>
+              </div>
+              {backupPasswordReview.whitespaceCount > 0 && (
+                <div className="backup-password-whitespace-warning">
+                  <strong>{t('settings.storage.backupPasswordWhitespaceTitle')}</strong>
+                  <code>{backupPasswordReview.visualized}</code>
+                  <small>{t('settings.storage.backupPasswordWhitespaceLegend')}</small>
+                  {backupPasswordReview.hasBoundaryWhitespace && (
+                    <small>{t('settings.storage.backupPasswordBoundaryWhitespace')}</small>
+                  )}
+                </div>
+              )}
+              {vaultStatus?.backupPasswordSaved && (
+                <p className="backup-password-change-warning">
+                  {t('settings.storage.backupPasswordChangeWarning')}
+                </p>
+              )}
+              <small className="backup-password-review-privacy">
+                {t('settings.storage.backupPasswordReviewPrivacy')}
+              </small>
+            </div>
+          }
+          confirmLabel={t(
+            vaultStatus?.backupPasswordSaved
+              ? 'settings.storage.backupPasswordChangeConfirm'
+              : 'settings.storage.backupPasswordReviewConfirm',
+          )}
+          danger={vaultStatus?.backupPasswordSaved}
           onConfirm={() => void persistBackupPassword()}
-          onCancel={() => setIsBackupPasswordChangePending(false)}
+          onCancel={() => setIsBackupPasswordReviewPending(false)}
         />
       )}
     </ModalPortal>

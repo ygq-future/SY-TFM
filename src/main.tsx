@@ -22,15 +22,11 @@ createRoot(rootElement).render(
   </StrictMode>,
 );
 
-// 原生窗口先保持隐藏，待 React 与首屏样式完成两帧布局后再显示，避免启动白屏闪烁。
-requestAnimationFrame(() => {
-  requestAnimationFrame(() => {
-    try {
-      void getCurrentWindow()
-        .show()
-        .catch(() => undefined);
-    } catch {
-      // Vite 浏览器预览没有 Tauri 窗口上下文。
-    }
-  });
-});
+// 隐藏窗口不会稳定派发 animation frame；React 挂载后应立即显示，避免启动死锁。
+try {
+  void getCurrentWindow()
+    .show()
+    .catch(() => undefined);
+} catch {
+  // Vite 浏览器预览没有 Tauri 窗口上下文。
+}

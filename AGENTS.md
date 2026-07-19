@@ -244,6 +244,7 @@ locales/      en.json / zh.json（i18n）
 | uuid | 1 |
 | directories | 6 |
 | parking_lot | 0.12 |
+| tauri-plugin-single-instance | 2.4 |
 
 ### 12.2 前端 (React)
 

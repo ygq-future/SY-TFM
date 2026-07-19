@@ -2,6 +2,8 @@
 
 /// 应用在系统目录下创建的专用子目录。
 pub(crate) enum AppDirectory {
+    /// 便携版可执行文件旁的应用数据根目录。
+    PortableData,
     /// 默认下载根目录。
     DownloadRoot,
     /// 外部编辑器使用的临时文件根目录。
@@ -16,6 +18,7 @@ impl AppDirectory {
     /// 返回稳定的目录名称。
     pub(crate) const fn as_str(&self) -> &'static str {
         match self {
+            Self::PortableData => "data",
             Self::DownloadRoot => "SY-TFM",
             Self::RemoteEditRoot => "SY-TFM",
             Self::RemoteEditLease => ".lock",

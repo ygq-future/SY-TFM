@@ -69,6 +69,9 @@ describe('portable vault and WebDAV sync', () => {
     expect(dialog).toContain('vaultStatus?.backupPasswordSaved');
     expect(dialog).toContain('settings.storage.backupPasswordStoredOnWindows');
     expect(dialog).toContain('backup-password-footer');
+    expect(dialog).toContain('isBackupPasswordReviewPending');
+    expect(dialog).toContain('backup-password-review-value');
+    expect(dialog).toContain('backupPasswordReviewWhitespace');
     expect(dialog).not.toContain('className="sr-only"');
     expect(styles).toMatch(
       /\.setting-row\.setting-row--backup-password\s*\{[^}]*grid-template-columns:\s*1fr/s,

@@ -12,4 +12,8 @@ export type StoragePaths = {
    * SY-TFM 默认应用数据目录。
    */
   defaultDataPath: string;
+  /**
+   * 当前副本是否由便携模式标记启动。
+   */
+  portableMode: boolean;
 };

@@ -46,16 +46,21 @@ impl SettingsService {
     /// 将已完成加密升级的配置写入磁盘。
     fn write(settings: &AppSettings) -> Result<(), AppError> {
         let base_path = Self::default_settings_file_path()?;
-        let path = settings
-            .default_data_path
-            .as_deref()
-            .filter(|path| !path.trim().is_empty())
-            .map(PathBuf::from)
-            .map(|path| path.join("settings.json"))
-            .unwrap_or_else(|| base_path.clone());
+        let portable_mode = crate::storage::portable_mode::portable_data_dir()?.is_some();
+        let path = if portable_mode {
+            base_path.clone()
+        } else {
+            settings
+                .default_data_path
+                .as_deref()
+                .filter(|path| !path.trim().is_empty())
+                .map(PathBuf::from)
+                .map(|path| path.join("settings.json"))
+                .unwrap_or_else(|| base_path.clone())
+        };
         Self::write_json(&path, settings)?;
 
-        if path != base_path {
+        if !portable_mode && path != base_path {
             let locator = AppSettings {
                 default_data_path: settings.default_data_path.clone(),
                 ..AppSettings::default()
@@ -79,6 +84,9 @@ impl SettingsService {
 
     /// 平台默认应用数据目录。
     pub fn default_data_dir() -> Result<PathBuf, AppError> {
+        if let Some(portable_data_dir) = crate::storage::portable_mode::portable_data_dir()? {
+            return Ok(portable_data_dir);
+        }
         let proj = ProjectDirs::from("com", "sy", "SY-TFM")
             .ok_or_else(|| AppError::new(ErrorCode::PlatformUnsupported, "无法确定平台配置目录"))?;
         Ok(proj.data_local_dir().to_path_buf())
@@ -284,6 +292,9 @@ fn repair_primary_from_backup(path: &Path, settings: &AppSettings) -> Result<(),
 }
 
 fn resolve_settings_file_path(base_path: &Path) -> Result<PathBuf, AppError> {
+    if crate::storage::portable_mode::portable_data_dir()?.is_some() {
+        return Ok(base_path.to_path_buf());
+    }
     let Some(loaded) = load_settings_from_path(base_path)? else {
         return Ok(base_path.to_path_buf());
     };

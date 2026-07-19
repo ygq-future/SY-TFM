@@ -6,6 +6,7 @@
 pub mod adapter_capability;
 pub(crate) mod app_directory;
 pub(crate) mod app_event;
+pub(crate) mod app_file;
 pub(crate) mod connection_policy;
 pub mod connection_status;
 pub mod edit_mode;

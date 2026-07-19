@@ -2303,6 +2303,102 @@ textarea,
   padding-inline: 12px;
 }
 
+.compact-modal:has(.backup-password-review) {
+  width: min(520px, calc(100vw - 32px));
+  max-width: 520px;
+}
+
+.backup-password-review {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 12px;
+}
+
+.backup-password-review > p {
+  font-size: var(--type-label-size);
+  line-height: 1.55;
+}
+
+.backup-password-review-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--glass-line-soft));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--modal-control) 84%, transparent);
+  padding: 11px 12px;
+}
+
+.backup-password-review-card > span,
+.backup-password-whitespace-warning > strong {
+  color: var(--app-muted);
+  font-size: var(--type-caption-size);
+  font-weight: 700;
+}
+
+.backup-password-review-value {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  color: var(--app-ink);
+  font-size: calc(var(--type-data-size) + 2px);
+  user-select: text;
+}
+
+.backup-password-review-value i {
+  flex: 0 0 auto;
+  color: var(--accent-strong);
+  font-style: normal;
+}
+
+.backup-password-review-value code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.backup-password-review-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.backup-password-review-meta span {
+  border-radius: 999px;
+  background: var(--surface-soft);
+  padding: 3px 7px;
+  color: var(--app-muted);
+  font-size: var(--type-caption-size);
+}
+
+.backup-password-whitespace-warning {
+  display: grid;
+  gap: 6px;
+  border-left: 2px solid var(--accent-strong);
+  padding-left: 10px;
+}
+
+.backup-password-whitespace-warning code {
+  width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--accent-strong);
+  font-size: var(--type-data-size);
+  user-select: text;
+}
+
+.backup-password-whitespace-warning small,
+.backup-password-review-privacy {
+  color: var(--app-muted);
+  font-size: var(--type-caption-size);
+  line-height: 1.45;
+}
+
+.backup-password-change-warning {
+  border-top: 1px solid var(--glass-line-soft);
+  padding-top: 10px;
+}
+
 @media (max-width: 820px) {
   .vault-form-grid,
   .vault-summary {
