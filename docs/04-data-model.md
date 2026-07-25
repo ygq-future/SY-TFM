@@ -613,6 +613,8 @@ impl Default for AppSettings {
 }
 ```
 
+`backgroundImagePath` 在桌面端是用户选择的普通本地文件路径；Android Photo Picker 返回的 `content://` 只具有受限 URI 访问语义，选择后必须立即复制到应用私有 `files/backgrounds/selected-background-<sha256-prefix>.<ext>`，配置保存内容寻址后的路径而不是原始 URI。不同图片即使扩展名相同也必须产生不同路径，以触发 WebView 背景资源重载；旧内容在新文件原子落盘后清理，且不会要求全盘媒体权限。
+
 ---
 
 ### 3.4 HostDto（主机传输对象）
@@ -822,14 +824,52 @@ enc.v1:<Base64(nonce || ciphertext || tag)>
     "ciphertext": "Base64 wrapped Vault Key"
   },
   "payloadNonce": "Base64",
+  "payloadEncoding": "gzip",
   "ciphertext": "Base64 encrypted portable settings"
 }
 ```
 
 `keyEnvelope` 允许用户更换设备后用备份密码解锁同一个 Vault Key；载荷认证数据绑定 `vaultId + revision`，篡改 metadata 会导致解密失败。
 本地 `VaultSyncSettings.password` 保存的是设备绑定 `enc.v1` WebDAV 密码，不会写入便携载荷。
-解密后的载荷包含完整 `AppSettings`，并可选附带 `{ fileName, dataBase64 }` 背景图片。图片和全部配置位于同一个 AES-256-GCM 密文中，恢复时图片会落盘到当前设备应用数据目录的 `backgrounds` 子目录。
-`VaultSyncSettings.backupPassword` 是便携导出与 WebDAV 共用的备份密码，只以当前设备 `enc.v1` 密文保存在 `settings.json`，不会进入便携载荷。`enabled=false` 表示暂停而非解绑，其余同步字段必须原样保留。
+本地便携导出的解密载荷包含完整 `AppSettings`，并可选附带 `{ fileName, dataBase64 }` 背景图片；恢复时图片会落盘到当前设备应用数据目录的 `backgrounds` 子目录。
+
+新文档先 gzip 压缩明文载荷再加密；旧文档没有 `payloadEncoding` 时按未压缩载荷读取。WebDAV 云端文档沿用外层 `vault.v1` 加密信封，但其解密后的载荷使用 schema v3：
+
+```json
+{
+  "schemaVersion": 3,
+  "hosts": ["跨平台共享的 RemoteHost（含明文后再整体加密的密码）"],
+  "platforms": [
+    {
+      "platform": "windows",
+      "settings": "不含 hosts/vaultSync 的 Windows AppSettings",
+      "hostSettings": [{ "hostId": "uuid", "downloadPath": "C:/Downloads/SY-TFM" }],
+      "backgroundAsset": {
+        "fileName": "wallpaper.png",
+        "remoteFile": "background-windows-<sha256>.gz",
+        "sha256": "hex",
+        "uncompressedSize": 8388608
+      }
+    },
+    {
+      "platform": "android",
+      "settings": "不含 hosts/vaultSync 的 Android AppSettings",
+      "hostSettings": [{ "hostId": "uuid", "downloadPath": "/storage/.../SY-TFM" }],
+      "backgroundAsset": {
+        "fileName": "selected-background.jpg",
+        "remoteFile": "background-android-<sha256>.gz",
+        "sha256": "hex",
+        "uncompressedSize": 6291456
+      }
+    }
+  ]
+}
+```
+
+同步时当前平台只替换自己的 `platforms` 条目并更新共享 `hosts`，其他平台条目原样保留。每主机 `downloadPath` 也保存在当前平台的 `hostSettings`，不会进入共享主机。平台背景的本地绝对路径不写入云端，只保存资源索引；实际字节位于同一 `/SY-TFM` 目录下的 `background-windows-<sha256>.gz`、`background-android-<sha256>.gz` 等内容寻址平台文件。新资源先上传，配置提交成功后才清理旧资源，因此正常状态每个平台只有一个压缩包，失败重试期间可能暂时保留新旧两个。恢复时先验证解压上限、原始大小和 SHA-256，再写入当前设备 `backgrounds` 目录。不存在当前平台条目则采用当前平台默认设置，只恢复主机连接数据。旧 schema v1 没有平台标识，迁移时仅保留可证明共享的主机；schema v2 的 `{ fileName, dataBase64 }` 会在下一次同步迁移为独立资源。
+`VaultSyncSettings.backupPassword` 是便携导出与 WebDAV 共用的备份密码，只以当前设备 `enc.v1` 密文保存在 `settings.json`，不会进入便携载荷。`lastSyncedHostsHash` 与 `lastSyncedPlatformHash` 分别缓存共享主机和当前平台条目的 SHA-256 指纹；`lastSyncedScopeHash` 保留组合指纹，供旧配置迁移和完整作用域校验。`lastSyncedHostsSnapshot` 保存由当前设备主密钥再次加密的上次共享主机快照，仅用于逐 UUID 三方合并，不得以明文落盘或上传云端。这些检查点不包含其他平台条目；`enabled=false` 表示暂停而非解绑，其余同步字段必须原样保留。
+
+同步先下载并解密云端文档。共享主机按稳定 UUID 与加密的上次快照执行三方合并：不同 UUID 的两端新增取并集；某端未修改的记录接受另一端更新或删除；删除与同一记录的并发编辑以删除优先，防止离线设备复活已删除主机；同一 UUID 的不兼容并发新增/编辑仍返回明确冲突。主机顺序在只有一端变化时采用变化端，两端都变化时以云端现有顺序为基准追加本地独有项。当前平台条目继续按独立指纹三方判断，因此两个不同作用域可在同一轮中双向合并。内容相同则不上传、不增加 revision。旧设备在第一次主机写入前若哈希仍匹配，会先生成加密快照；无法确认基线时采用保守冲突策略。
 
 ---
 

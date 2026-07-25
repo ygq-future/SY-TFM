@@ -76,6 +76,7 @@
 | XML 解析 | quick-xml | 0.38 | WebDAV PROPFIND 响应解析 |
 | 加密 | aes-gcm | 0.10 | AES-256-GCM |
 | 密钥派生 | argon2 | 0.5 | 本地密码加密 |
+| 内容指纹 | sha2 | 0.10 | WebDAV 当前平台同步作用域的 SHA-256 缓存 |
 | 序列化 | serde | 1.0 | JSON 序列化 |
 | JSON | serde_json | 1.0 | JSON 支持 |
 | 类型导出 | ts-rs | 11 | Rust → TypeScript 类型自动生成 |
@@ -84,7 +85,7 @@
 | 日志 | tracing | 0.1 | 结构化日志 |
 | 应用错误 | anyhow | 1 | 应用错误处理 |
 | 库错误定义 | thiserror | 2 | 库错误定义 |
-| 平台密钥存储 | keyring | 3 | Keychain / DPAPI |
+| 平台密钥存储 | keyring 3 + Android 原生插件 | — | Keychain / DPAPI / Android Keystore |
 | UUID | uuid | 1 | 唯一 ID |
 | 配置目录 | directories | 6 | AppData / ~/.config |
 | 高性能锁 | parking_lot | 0.12 | Mutex / RwLock |
@@ -1266,7 +1267,7 @@ React Component (自动重渲染)
 | macOS | Keychain | 使用 `keyring` crate |
 | Linux | 文件 `~/.local/share/sy-tfm/key.bin` (0600) | 首次生成随机 32 字节 |
 | iOS | iOS Keychain (kSecAttrAccessibleWhenUnlocked) | Tauri iOS 原生支持 |
-| Android | Android Keystore | 使用 KeyStore API |
+| Android | Android Keystore | `plugins/secure-storage` 使用不可导出 AES-GCM KeyStore Key 加密 SharedPreferences 中的凭据 |
 
 ### 8.3 跨设备加密保险库
 
@@ -1277,10 +1278,13 @@ React Component (自动重渲染)
 2. 用户备份密码通过 Argon2id（64 MiB、3 次迭代）派生包装密钥，仅用于保护 Vault Key；
 3. 当前设备可将解锁后的 Vault Key 缓存在 Credential Manager/Keychain/Keystore；
 4. 新设备输入备份密码解锁 Vault，恢复后再由新设备主密钥生成自己的 `enc.v1`；
-5. WebDAV 同步仅经 `FileTransport` trait 调度，固定写入 `/SY-TFM/sy-tfm-vault.sytfm`；
+5. WebDAV 同步仅经 `FileTransport` trait 调度，配置固定写入 `/SY-TFM/sy-tfm-vault.sytfm`，背景资源按平台写入独立 `background-<platform>-<sha256>.gz`；
 6. Vault ID + 单调 revision 阻止已知的跨设备旧版本静默覆盖。
 
-便携载荷包含完整应用配置、主机配置、信任记录和下载/数据目录设置。本地背景图片会以 Base64 字节随载荷一起加密，恢复时写入当前设备应用数据目录；WebDAV 凭据本身仍由本机系统主密钥保护。
+本地便携导出仍包含当前设备的完整应用配置、主机配置、信任记录、下载/数据目录设置和可选背景图片。新生成的 `vault.v1` 文档先对明文 JSON 做 gzip，再执行 AES-256-GCM；没有 `payloadEncoding` 的旧文档仍按未压缩载荷读取。WebDAV 云端载荷使用 schema v3：顶层仅保存跨平台共享的远端主机连接数据；每主机下载目录属于本地路径，与主题、语言、五档字号、全局下载/数据路径、窗口选项等其余设置按 `Platform` 分区。背景字节不再 Base64 内嵌，只在平台条目保存原文件名、平台资源名、SHA-256 和原始大小，并单独 gzip 上传。同步前必须解密并合并现有云端载荷，只替换当前原生平台分区并保留其他平台分区；恢复时若没有当前平台分区，则使用该平台 `AppSettings::default()`，仅恢复共享主机。旧 schema v1 只迁移可证明共享的主机；schema v2 内嵌背景会在下一次同步迁移为平台压缩资源。
+每个平台在本机分别缓存共享主机与自身平台分区的 SHA-256 指纹，同时保留旧版组合指纹用于迁移。共享主机还保存一份由设备主密钥加密的上次同步快照：同步按主机 UUID 做三方合并，不同主机的并发新增取并集，远端删除会移除本地未修改的旧记录，删除与同记录编辑冲突时删除优先；只有同一 UUID 的不兼容并发编辑/新增才报告冲突。平台设置仍按整体平台指纹三方比较，因此 Windows 主机变化与 Android 外观变化可在一轮中安全合并。内容完全一致时只更新本机 revision 检查点，不生成新 revision 或上传。主机增删改保留 1.5 秒快速触发；实时外观设置仅在关闭设置窗口、应用进入后台或 30 秒云端检查时核对一次。
+背景摘要属于平台作用域，但背景压缩包独立增量判断：远端文件存在且 SHA-256/原始大小未变时，即使主机或其他本平台设置变化，也不再次上传图片；压缩包缺失时可在不制造空配置 revision 的情况下补传。资源名内容寻址，更新时先上传新资源、再提交引用它的配置、最后清理旧资源，任何一步中断都不会破坏旧 revision 可用的图片。
+WebDAV 凭据本身仍由本机系统主密钥保护，不进入便携或云端载荷。
 便携导出和 WebDAV 使用同一份备份密码；该密码与 WebDAV 密码一样仅以设备绑定的 `enc.v1` 保存。暂停同步只切换 `enabled=false`，不得清除凭据、Vault Key、revision 或最近同步时间。
 更换备份密码时，当前设备使用新密码重新包装既有 Vault Key，但不静默重写远端；已有便携备份仍由旧密码保护，WebDAV 在用户下一次明确同步时随新 revision 切换到新的密钥信封。
 
@@ -1340,6 +1344,13 @@ fn platform_default_download_dir() -> String {
         .to_string();
 }
 ```
+
+### 9.3 Android WebView 输入、媒体 URI 与合成性能
+
+- Android Photo Picker 返回 `content://` 媒体 URI，不得用 Rust `std::fs` 当作普通路径读取。前端选择后立即调用 `plugins/android-storage`，由 `ContentResolver` 按 MIME 校验并以流式上限 20MB 复制到应用私有 `files/backgrounds`，配置只保存复制后的稳定本地路径。Windows/macOS/Linux 的普通文件路径流程不变。
+- WebView 在 `MainActivity.onWebViewCreate` 中显式标记 `IMPORTANT_FOR_AUTOFILL_YES`；账号密码输入必须处于语义 `<form>` 内，并提供稳定 `id`、`name` 与 W3C `autocomplete`。WebView 仍以 `tauri.localhost` 作为 Web 域，最终候选展示由用户启用的 Autofill 服务决定。
+- Android 可编辑控件保留系统长按选择、复制和剪切菜单，应用级 `contextmenu` 抑制只作用于文件管理等非文本区域；抽屉手势不得从输入框或其他可编辑区域起步。
+- Android 主界面滚动表面禁用大面积 `backdrop-filter`，改用已有半透明表面颜色；抽屉拖动仅更新 CSS 变量和 `translate3d` 合成层，松手使用独立 settle 状态完成剩余位移动画。上述策略由 `html.mobile-platform` 隔离，不改变 Windows 玻璃效果。
 
 ---
 
@@ -1515,8 +1526,8 @@ bun run tauri build -- --target aarch64-apple-darwin  # 交叉编译
 
 # 移动端
 bun run tauri android init   # 初始化 Android 项目
-bun run tauri android dev    # Android 开发调试
-bun run tauri android build  # Android APK/AAB
+bun run tauri android dev    # Android 联机开发调试；命令和前端开发服务必须保持运行
+bun run tauri android build --target aarch64 --apk --ci  # 可离线安装的 arm64 Release APK
 
 bun run tauri ios init       # 初始化 iOS 项目
 bun run tauri ios dev        # iOS 开发调试

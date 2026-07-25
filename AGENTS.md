@@ -5,7 +5,7 @@
 > 详细设计请查阅 `docs/` 目录（需求 `01-requirements.md`、架构 `02-architecture.md`、
 > 接口 `03-api-spec.md`、数据模型 `04-data-model.md`、实现计划 `05-implementation-plan.md`、进度日志 `06-progress-log.md`）。
 >
-> **默认规则**：当本文件与任何实现细节产生冲突时，以本文件与 `docs/` 的架构决策（ADR-001~010）为准；如遇歧义，先确认再动手，不要擅自偏离架构。
+> **默认规则**：当本文件与任何实现细节产生冲突时，以本文件与 `docs/` 的架构决策（ADR-001~022）为准；如遇歧义，先确认再动手，不要擅自偏离架构。
 
 ---
 
@@ -94,9 +94,9 @@
 ## 5. 安全约束（SECURITY）
 
 - **密码加密**：AES-256-GCM，存储格式 `enc.v1:<Base64(nonce || ciphertext || tag)>`（nonce 12B、tag 16B）。
-- **密钥存储**：经 `keyring` crate 统一五平台——
-  Windows DPAPI / macOS Keychain / Linux `~/.local/share/sy-tfm/key.bin`(0600) /
-  iOS Keychain / Android Keystore。**禁止**将密钥明文写入配置文件。
+- **密钥存储**：Windows / macOS / Linux / iOS 使用 `keyring` 原生后端；Android 使用项目内
+  `plugins/secure-storage` 调用 Android Keystore，以不可导出的 AES-GCM 密钥保护本机凭据。
+  **禁止**在 Android 使用 `keyring` 的 mock backend，也禁止将密钥明文写入配置文件。
 - **绝不（NEVER）将密码写入日志**。
 - **配置迁移**：`configVersion` v1（SY-FTP 明文）→ v2 → v3（SY-TFM，当前）。
   旧版明文密码加载后自动升级为 `enc.v1:` 加密；配置文件损坏须回退默认值且不丢失主机列表。
@@ -156,7 +156,8 @@ locales/      en.json / zh.json（i18n）
 
 ## 8. 平台约束
 
-- 最低版本：iOS 14 / Android 8(API 26) / Windows 10(1809) / macOS 11 / Linux(Ubuntu 20.04+)。
+- 最低版本：iOS 14 / Android 12(API 31) / Windows 10(1809) / macOS 11 / Linux(Ubuntu 20.04+)。
+- **平台适配零回归（HARD CONSTRAINT）**：任何 Android/iOS/桌面专项 UI、交互、路径或生命周期逻辑必须由原生平台判定显式隔离；禁止仅用视口宽度推断平台。新增平台适配不得改变其他既有平台的视觉、交互与存储行为，完成前必须运行并记录受影响平台与既有平台的回归验证。
 - 响应式断点（Tailwind）：`mobile < 768px`（单列+底部 Tab+抽屉）、
   `tablet 768–1024px`（双列+可折叠侧栏）、`desktop > 1024px`（三列+侧栏+详情面板）。
 - 桌面端：Ctrl/Shift 多选、橡皮筋框选、dnd-kit 拖拽；移动端：长按多选、左滑删除/右滑更多、下拉刷新、Haptic。
@@ -192,7 +193,7 @@ locales/      en.json / zh.json（i18n）
 - **阶段性质量门禁（强制）**：每完成一个阶段性功能（里程碑 / Phase / 可提交的功能点），
   必须依次运行 `bun lint && bun format && bun test`，三者全部通过后方可提交代码或进入下一阶段。
 - 每次开发会话结束后，按 `docs/06-progress-log.md` 附录规范更新进度日志（追加 Session 记录、ADR、任务状态、风险）。
-- 架构决策以 ADR-001~010 为准；新决策须追加 ADR 并同步本文件。
+- 架构决策以 ADR-001~022 为准；新决策须追加 ADR 并同步本文件。
 
 ---
 
@@ -232,6 +233,7 @@ locales/      en.json / zh.json（i18n）
 | quick-xml | 0.38 |
 | aes-gcm | 0.10 |
 | argon2 | 0.5 |
+| sha2 | 0.10 |
 | serde | 1.0 |
 | serde_json | 1.0 |
 | ts-rs | 11 |

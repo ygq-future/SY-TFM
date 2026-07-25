@@ -373,7 +373,7 @@ SY-TFM 是一个跨平台、轻量级远程文件管理器。"SY" 为个人前�
 ### 7.2 平台约束
 
 - iOS 最低版本 14.0
-- Android 最低版本 8.0（API 26）
+- Android 最低版本 12.0（API 31）
 - Windows 最低版本 10（1809）
 - macOS 最低版本 11.0（Big Sur）
 - Linux: 支持主流发行版（Ubuntu 20.04+, Fedora 35+）

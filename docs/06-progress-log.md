@@ -2,8 +2,8 @@
 
 **项目名称:** SY-TFM (Tiny File Manager)  
 **创建日期:** 2026-07-10  
-**最后更新:** 2026-07-19
-**当前阶段:** Phase 2 已完成 — Windows 桌面基线 v1.0.0
+**最后更新:** 2026-07-25
+**当前阶段:** Phase 3 进行中 — Android 真机运行已验证，正在重构移动端排版
 
 > **使用说明:** 本文档是项目的活文档（living document），每次开发会话结束后更新。  
 > 顶部是快速概览，往下是详细记录。最新的内容在最上面。
@@ -16,15 +16,15 @@
 
 | 指标 | 值 |
 |------|-----|
-| 当前阶段 | Phase 0/1/2 已完成；下一阶段为 Phase 3 移动端适配 |
-| 当前任务 | 完成 Windows 便携版与 NSIS 分发基础，准备真实服务端与安装包人工验收 |
+| 当前阶段 | Phase 0/1/2 已完成；Phase 3 Android 适配已启动 |
+| 当前任务 | Android 主机抽屉与动态工作区尺寸、圆角和滑动反馈复核 |
 | 总体进度 | 文档设计 100%，Phase 0/1 完成，Phase 2 为 22/22（2 项由新版交互取代） |
-| 阻塞项 | 无；MSVC 编译、测试与 ts-rs 导出均已恢复 |
+| 阻塞项 | 无；Android 首次交叉编译与调试产物已验证 |
 | 文档状态 | ✅ 需求 ✅ 架构 ✅ 接口 ✅ 数据模型 ✅ 实现计划 ✅ 进度日志 |
 
 ### 0.2 当前在做
 
-> Windows 桌面核心功能、便携运行时、NSIS 安装器视觉资源与加密保险库已就位；下一步进入真实服务端、安装/卸载与长时间稳定性验收。
+> Windows 桌面基线保持冻结；Android 已完成真机安装运行，当前按原生平台标记独立重排移动端界面。
 
 ### 0.3 下一步计划
 
@@ -39,7 +39,7 @@
 | Phase 0 — 项目骨架 | ✅ 已完成 | 12/12 | 7/7 | 类型导出与 Rust 测试已恢复 |
 | Phase 1 — 桌面端 MVP | ✅ 已完成 | 30/30 | 3/3 | 完整协议 feature、前端构建与自动化测试通过 |
 | Phase 2 — 功能补全 | ✅ 已完成 | 22/22 | 3/3 | Windows 桌面 v1.0.0 自动化基线完成 |
-| Phase 3 — 移动端适配 | ⬜ 未启动 | 0/21 | 0/6 | |
+| Phase 3 — 移动端适配 | 🟡 进行中 | 2/21 | 1/6 | Android 工程、调试产物与真机运行已验证；视觉适配进行中 |
 | Phase 4 — 优化打磨 | ⬜ 未启动 | 0/17 | 0/5 | |
 | Phase 5 — 发布准备 | 🟡 进行中 | 1/8 | 0/3 | 五平台图标资源已生成 |
 
@@ -50,6 +50,560 @@
 ## 1. 会话日志
 
 > 每次开发会话在此追加记录，最新在最上面。
+
+### Session #079 — 2026-07-25
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-25 |
+| **类型** | Android 主机抽屉关闭终点残影修复 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:** 抽屉增加 8px 左右外间距后，关闭终点仍按自身宽度平移 `-100%`，其右边缘因此会停留在屏幕左侧 8px 范围内，直到收尾状态约 300ms 后切换 `visibility` 才消失。现将进度到位移的映射统一为百分比位移加按进度衰减的 8px 边缘补偿：完全打开保持 `0%`，完全关闭为 `calc(-100% - 8px)`，中间拖动连续插值；没有通过提前隐藏截断动画。
+
+**平台隔离:** 位移样式仍位于 `html.mobile-platform`，新映射函数只由 Android 主机抽屉调用，Windows 不受影响。
+
+**验证:** 先增加关闭、中点和打开三种位移的失败测试；专项测试 41/41 通过，`bun lint`、`bun format`、`bun test`（28 files / 180 tests）及 `bun run build` 全部通过。真机需要复核快速甩动和慢速拖动两种关闭手势。
+
+### Session #078 — 2026-07-25
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-25 |
+| **类型** | Android 主机抽屉动态尺寸与滑动表面收敛 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:** 主机抽屉此前采用相对视口的固定定位，顶部仍写死为旧的 48px 标题栏高度，底部也独立估算状态栏与安全区；主面板则位于会随标题栏和底栏自动伸缩的工作区内，因此标题栏调矮后两者必然错位。现将抽屉改为工作区内的绝对定位，并让抽屉与主面板共用 8px 横向间距、6px 纵向间距和 14px 圆角变量，从结构上保证顶部栏、底部栏或传输状态变化时仍完全同尺寸。移除抽屉和遮罩的透明度渐变及逐帧透明度写入，遮罩保留交互层但完全透明，滑动时只绘制抽屉本体的平移。
+
+**平台隔离:** 改动仅位于 `html.mobile-platform` 的 Android 样式规则；Windows 布局、主机侧栏尺寸和悬浮交互未修改。
+
+**验证:** 先增加失败回归断言，再完成实现；Android 抽屉专项测试 36/36 通过，`bun lint`、`bun format`、`bun test`（28 files / 179 tests）及 `bun run build` 全部通过。圆角与四周实际间距仍需 Android 真机最终观感确认。
+
+### Session #077 — 2026-07-25
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-25 |
+| **类型** | Android 标题栏高度下限与 Vault 状态胶囊微调 |
+| **参与者** | 用户 + AI |
+
+**完成事项:** Android 顶部应用栏高度下限由 44px 调整为 32px，持久化值归一化与设置滑块同步更新；标题栏按钮和 Vault 胶囊高度改为跟随设置收缩，避免只降低容器却让 36–38px 子控件溢出。Vault 日期提升至 10–11px、启用等宽数字，并在右端增加语义状态灯：同步启用为带柔光的绿色，暂停或仅保存配置时为中性灰色。全部样式继续限制在原生 Android 规则内。
+
+**验证:** 先增加失败回归断言，再完成实现；`bun lint`、`bun format`、`bun run test`（28 files / 179 tests）与 `bun run build` 全部通过。32px 极限高度与状态灯实际观感仍需真机复核。
+
+### Session #076 — 2026-07-25
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-25 |
+| **类型** | 编辑状态生命周期与 Android 标题栏、竖屏策略优化 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:**
+
+- Online Edit 关闭路径只销毁编辑器组件，没有清除其写入的全局 `operationMessage`；Remote Edit 成功调用系统编辑器后又把一次性成功提示写成持久状态。现为编辑消息增加所有权比较，关闭或卸载仅清理编辑器自己发布且仍为当前值的消息，不会误删更新的连接/传输错误；在线读取与保存增加代次门禁，关闭后的异步回调不能重新写入残留状态；外部编辑成功交接后立即撤下“正在打开”，有效 watcher 继续由远程编辑会话入口呈现
+- Android 底栏宽度不足以同时容纳 Vault 状态、连接状态和文件计数。现将 Vault 状态和最近同步时间移到应用标题栏中央的双行紧凑胶囊；仅 `html.mobile-platform` 隐藏底栏 Vault 元数据，Windows 继续保留原完整状态和时间
+- `AppSettings` 新增向后兼容的 `mobileTitlebarHeight`（默认 48px），General 设置仅在原生 Android 显示 44–80px 调节项；CSS 高度在系统安全区之外动态计算。该设置随既有平台配置分区持久化，不改变 Windows 标题栏
+- Android 生成目录被 Git 忽略，直接修改 Manifest 无法持久化。现增加版本化 `tauri.android.conf.json` 与幂等构建准备脚本，在每次 Android dev/build 前为 MainActivity 写入 `sensorPortrait`。由于 targetSdk 36 在 `sw600dp` 大屏默认忽略方向限制，同时写入 API 36 临时兼容属性；该属性在未来 targetSdk 37 不再生效，届时必须完成自适应横屏布局
+
+**验证:** `bun run types:export`、`bun lint`、`bun format`、`bun run test`（28 files / 179 tests）、`bun run build`、`cargo fmt`、`cargo clippy --all-targets -- -D warnings` 与新增 Rust 默认值测试全部通过。Gradle `processUniversalDebugMainManifest` 输出 `BUILD SUCCESSFUL`，合并产物确认同时包含 `sensorPortrait` 与 `PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY`；外层 PowerShell 进程未在 120 秒工具窗口内退出而被标记超时，但 Manifest 任务本身已在 15 秒完成。Android 标题栏实际密度和高度手感仍需安装后真机复核。
+
+### Session #075 — 2026-07-24
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-24 |
+| **类型** | Android 在线编辑器零高度回归与 WebDAV 状态栏可见性修复 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:**
+
+- 通过已连接 Android 真机的 WebView 调试端口复现：远端 `nginx.conf` 已完整进入 CodeMirror 的 `.cm-content`，但 `.cm-editor` 与 `.cm-scroller` 实测高度均为 `0px`。原因是上一轮把 scroller 改成 `flex: 1 1 0`，同时高度规则错误匹配 `.cm-theme`；`@uiw/react-codemirror` 使用的实际外层类是 `.cm-theme-dark/.cm-theme-light`，未获得确定高度。现给组件增加稳定的 `.online-editor-codemirror` 类，外层、editor 与 scroller 逐级固定为可收缩的 `100%` 高度，并恢复 scroller 自身纵向滚动。真机注入同等规则后视口恢复到约 688px，`scrollHeight` 约 4249px
+- WebDAV 状态数据一直存在于 Android DOM，真机读取为 `Vault active`，但两个窄屏规则都使用 `.status-meta > span:first-child { display:none }`，恰好隐藏第一个 Vault 状态项。现用 `html.mobile-platform` 专项规则恢复云图标与当前同步状态，移动端隐藏过长的同步时间与分隔点以保留文件计数；Windows 完整状态和时间不变
+
+**验证:** 真机 CDP 已确认修复前数据存在但编辑器高度为 0，并验证候选规则可恢复真实视口与滚动范围；新增两个先失败后通过的回归断言。`bun lint`、`bun format`、`bun run test`（28 files / 174 tests）及 `bun run build` 全部通过。完整 Android debug 构建已在 21:19:14 更新 APK，Windows Release EXE 已在 21:38:37 更新；外层命令因同一个 Gradle Java 进程未退出而被手工终止，产物写盘后已清理该残留进程。随后设备从 ADB 断开，`adb install -r` 返回 `no devices/emulators found`，因此新版 APK 安装后的最终触摸滚动与状态栏视觉仍待重新连接真机复核。
+
+### Session #074 — 2026-07-24
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-24 |
+| **类型** | Android 背景热切换、主机冲突合并、编辑器滚动与双平台刷新优化 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:**
+
+- Android 导入器一直覆盖 `selected-background.<ext>`；连续选择同扩展名图片时设置值不变，React 背景 effect 不会重跑。现原生插件边复制边计算 SHA-256，保存为 `selected-background-<digest>.<ext>` 并清理旧文件，不再依赖手动关闭/开启背景
+- CodeMirror 自带的 scroller 强制 `height: 100% !important`，在嵌套 flex/grid 中按内容撑高后被外层裁切，表面上有 `overflow:auto` 仍无滚动范围。现将 scroller 改为可收缩的 `flex: 1 1 0`、`height:auto !important` 与独立纵向 overflow，覆盖鼠标滚轮和触摸平移
+- 移动性能优化曾把 `.host-sidebar` 也加入全局禁用 blur 清单，导致抽屉不响应毛玻璃设置。现仅恢复抽屉自身的 `glassOpacity/glassBlur`，其余 Android 全屏层继续禁用实时模糊；Windows 样式规则未改
+- 30 秒云端检查成功后曾调用带 `isLoading=true` 的 `loadHosts()`，即使数据不变也闪出加载态。现轮询使用静默 `refreshHosts()`，相同数组不替换 Zustand 状态，显式导入/首载仍保留原 loading 语义
+- 共享主机由整体哈希冲突升级为“设备加密的上次快照 + 按 UUID 三方合并”：远端删除与本地新建可同时落地，两端不同 UUID 的新增取并集，删除优先于同记录离线编辑，同一 UUID 的不兼容双端修改明确报冲突；旧检查点在首次主机写入前安全迁移为 `enc.v1` 快照
+- 在线编辑入口不再按扩展名提前拦截；后端下载后按 UTF-8/UTF-16 BOM 与 NUL/控制字符比例判定文本，`.bash_profile` 等无扩展名文本可编辑，二进制仍拒绝。外部 Remote Edit 的扩展名门禁保持不变
+- 设置面板不再依赖不确定的 idle 懒加载，23 KiB 模块并入启动加载，首次点击与后续点击使用同一同步渲染路径。移动滑块增加透明手势保护层：只有从当前 thumb 附近开始且方向确认是横向的拖动才修改值，纵向手势交给设置页滚动
+
+**验证:** `bun run types:export`、`bun lint`、`bun format`、`bun run test`（28 files / 174 tests）、`bun run build`、`cargo fmt`、`cargo clippy --all-targets -- -D warnings`、`cargo test`（122 单元测试 + 类型/窗口测试）全部通过。Android 原生存储插件 `compileDebugKotlin` 通过；完整 `bun run tauri android build --debug --target aarch64 --apk --ci` 成功生成 arm64 debug APK；Windows `bun run tauri build -- --no-bundle` 成功生成 Release EXE。Android 背景视觉、120 Hz 抽屉和滑块手感仍需本次 APK 真机复核。
+
+### Session #073 — 2026-07-24
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-24 |
+| **类型** | Android 背景二进制渲染、WebDAV 双向合并、编辑器滚动与设置预热 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:**
+
+- Android 私有图片路径和导入本身正确，但 Asset Protocol 仍给渲染链增加平台 scope 与 URL 转换依赖；现由 Rust 返回原始图片字节，Android WebView 创建并回收 Blob URL，Windows 继续使用既有 Data URL。背景只有在实际字节加载成功后才进入启用态，关闭时也不会让旧图片瞬间以满不透明度闪现
+- 原 30 秒定时器只读取本地同步状态，不能发现 Windows/Android 的远端主机变化；现定时器执行真实 WebDAV 三方核对，并把共享主机与当前平台设置拆成两个独立指纹。不同作用域可双向合并，同一作用域两端并发变化才冲突；无变化不上传、不增加 revision
+- 主机增删改仍按 1.5 秒防抖快速同步，未改变的主机保存会在写盘前直接返回。实时设置不再逐项调度同步，只在设置关闭、应用进入后台或 30 秒检查时等待写队列落盘后核对一次
+- CodeMirror 宿主和 scroller 补齐 `min-height: 0`、显式滚动与触摸平移；设置对话框模块在主线程空闲时预加载，消除第一次点击时才解析约 23 KiB 独立 chunk 的冷启动停顿
+
+**验证:** `bun run types:export`、`bun lint`、`bun format`、`bun test`（28 files / 172 tests）、`bun run build`、`cargo fmt --check`、`cargo clippy --lib -- -D warnings` 与 `cargo test --lib`（115 tests）通过。Windows Release `--no-bundle` 构建成功；Android ARM64 Release APK 构建成功，12,510,895 bytes，minSdk 31、targetSdk 36、仅 `arm64-v8a`，APK Signature Scheme v2/单签名者验证通过。当前无 ADB 设备在线，Android 背景最终视觉仍需安装本次 APK 真机复核。
+
+### Session #072 — 2026-07-24
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-24 |
+| **类型** | Android 背景 Asset Protocol scope 修复与自动同步触发审计 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:**
+
+- 上一轮确认了 Android 应使用 Asset Protocol，但 scope 写成 `$APPDATA/backgrounds/**`。Tauri 2.11.5 在 Android 将 `$APPDATA` 解析为 `activity.dataDir`（`/data/user/0/com.sy.tfm`），项目导入插件则把图片保存到 `activity.filesDir/backgrounds`（`/data/user/0/com.sy.tfm/files/backgrounds`），因此真实文件始终被 scope 拒绝
+- 新增 Android 平台覆盖配置 `tauri.android.conf.json`，仅 Android 把 Asset Protocol scope 设为 `$APPDATA/files/backgrounds/**`；基础配置与 Windows Data URL 显示流程保持不变
+- 审计确认当前任何 `save_settings`、主机保存/删除/排序/导入都会调度自动同步。它不是固定周期上传，而是每次本地保存后重新开始 1.5 秒防抖；30 秒周期只刷新同步状态。防抖到期后仍会先下载云端并比较当前平台作用域，相同则不上传、不增加 revision
+
+**验证:** 先新增回归测试并复现缺少 Android 平台 scope 配置的失败，修复后定向 8 项通过；最终 `bun run lint` → `bun run format` → `bun run test` 质量门禁通过（28 files / 170 tests）。ARM64 Android Release 构建成功，APK 为 12,521,923 bytes，仅包含 `arm64-v8a`，并通过 APK Signature Scheme v2、单签名者验证；真机背景显示仍需安装本次 APK 复核。
+
+### Session #071 — 2026-07-24
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-24 |
+| **类型** | Android 背景显示修复与 WebDAV 背景资源增量拆分 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:**
+
+- Android Photo Picker 已正确把图片导入 `/data/user/0/.../files/backgrounds`，但界面仍让 Rust 把整张图片编码为超长 Data URL，再经 IPC 回传并注入 CSS；大图在 Android WebView 链路上无法可靠生效。现仅在原生移动平台用 Tauri `convertFileSrc` 读取应用私有路径，Asset Protocol scope 严格限制为 `$APPDATA/backgrounds/**`，Windows 继续使用原有本地路径读取流程
+- 云端 schema v2 的平台条目确实把背景原始字节 Base64 内嵌进加密主文件，带来约 33% 编码膨胀，且任何主机/平台配置变动都会重新上传整张图片。schema v3 改为只保存背景文件名、平台资源名、SHA-256 和原始大小，图片单独 gzip 为 `background-windows-<sha256>.gz`、`background-android-<sha256>.gz` 等内容寻址文件
+- 主配置改为明文 JSON 先 gzip、再 AES-256-GCM；加密后再压缩没有收益。`vault.v1` 增加可选 `payloadEncoding=gzip`，没有该字段的旧未压缩文档继续兼容读取
+- 同步时背景摘要与远端索引相同且压缩包存在则不重复上传；缺失时只补传资源，不制造空配置 revision。恢复时限制解压后大小并验证原始大小和 SHA-256，schema v2 内嵌背景会在下一次同步迁移为独立平台资源
+
+**验证:** 定向前端回归 20 项通过；最终 `bun run lint` → `bun run format` → `bun run test` 质量门禁通过（28 files / 170 tests），`cargo fmt --all`、`cargo clippy --lib -- -D warnings` 与 `cargo test --lib`（113 tests）通过。`bun run tauri android build --target aarch64 --apk --ci` 成功，生成 12,521,919 bytes 的 ARM64 Release APK，并通过 APK Signature Scheme v2、单签名者校验。当前无 ADB 设备在线，Android 私有背景的最终显示与 WebDAV 实服资源拆分仍需真机复核。
+
+### Session #070 — 2026-07-24
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-24 |
+| **类型** | Android 抽屉动画、背景图 URI、原生文本输入与性能诊断 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:**
+
+- Android 抽屉逐帧拖动本身已使用 CSS 变量，但松手时 `open`、`dragging` 和变量清理跨 React/rAF 时序竞争，快速滑动可能直接跳到终态；现增加 280ms 独立 settling 状态，从当前实际进度连续过渡到目标位置，期间拒绝新手势，完成后再清理合成层变量
+- Android 路径栏主机菜单由 184px 继续收紧为 164px；Windows 保持 196px 与桌面纯图标连接操作，不受本次移动端宽度修改影响
+- Photo Picker 返回没有文件扩展名的 `content://` URI，旧逻辑却用 `Path::extension` 和 `std::fs` 读取；输入失焦与选择回调还会并发重复校验。现由 Android 原生 `ContentResolver` 按 MIME 流式导入不超过 20MB 的图片到应用私有目录，设置只保存稳定路径；Android 输入框只读并取消失焦提交，错误提示由 i18n 统一输出，不再泄露 Rust 中文硬编码
+- 全局 `contextmenu.preventDefault()` 原本连 Android 输入框一起拦截，导致系统选择、复制、剪切菜单消失；现只在 Android 可编辑控件内放行原生菜单，并阻止抽屉手势从文本控件开始
+- 主机/WebDAV/备份密码输入补齐语义 form、`id/name/autocomplete`，Android WebView 显式设置 `IMPORTANT_FOR_AUTOFILL_YES`；密码管理器仍会把 Tauri WebView 识别为 `tauri.localhost`，候选展示取决于具体 Autofill 服务
+- 用户快照的 `TOTAL PSS` 为约 99MB，不能用 237MB RSS 作为独占内存；Java+Native 私有堆不足 7MB，主要为系统共享映射与图形内存。Android 静态主界面现关闭大面积实时 `backdrop-filter`，减少滚动和高刷新率下的 GPU 重栅格化，Windows 玻璃效果不变
+
+**验证:** 前端定向回归 57 项通过，最终 `bun run lint` → `bun run format` → `bun run test` 质量门禁通过（28 files / 168 tests）；`bun run build`、`cargo fmt --check`、`cargo clippy --lib -- -D warnings` 与 `cargo test --lib`（108 tests）通过。Android storage 插件和 MainActivity Kotlin 编译通过；首次 App 资源任务曾遇到本机 Gradle `appcompat-1.7.1` 转换缓存的 AAPT2 PNG 瞬时异常，随后完整 `bun run tauri android build --target aarch64 --apk --ci` 成功。生成 Release APK 为 12,421,663 bytes，APK Signature Scheme v2、单签名者验证通过。当前无 ADB 设备在线，抽屉手感、Photo Picker、Bitwarden 候选及温度/帧率仍需新 APK 真机复核。
+
+### Session #069 — 2026-07-24
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-24 |
+| **类型** | Windows 紧凑主机菜单、Android 离线资源诊断、WebDAV 增量同步 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:**
+
+- Windows `Choose host` 菜单在文字按钮移除后仍保留 248px 宽度和 76px 操作位；现收紧为 196px，连接/断开改为带 `title`/`aria-label` 的 30px 纯图标按钮，Android 184px 菜单保持原生平台隔离
+- `assets not found: index.html` 来自 528MB 开发调试产物：该 Rust 调试库不嵌入生产前端资源，离开 `tauri android dev` 的前端服务后不能作为离线 APK 重开；重新生成的 12.4MB arm64 Release APK 已验证 v2 签名有效，且 Rust 库内包含本次 `dist` 的 JS/CSS 资源
+- WebDAV 手动同步原本每次无条件增加 revision 并上传，同时把其他平台单独提高的 revision 当成冲突；现为每个本机平台缓存“共享主机 + 当前平台分区”的 SHA-256 指纹，仍先下载云端并做本地/云端/缓存三方比较
+- 当前平台作用域相同则不上传、不增加 revision，只采用云端检查点；其他平台独立变化而当前平台云端作用域仍等于缓存时，可安全保留对方平台数据并合并本平台改动；共享主机或当前平台发生并发变化时仍拒绝覆盖
+- 旧配置没有作用域指纹时采用保守兼容策略；首次内容一致比较、恢复、首次启用或成功上传后自动建立缓存
+
+**验证:** `bun run types:export`、`cargo fmt --check`、`cargo clippy --lib -- -D warnings`、`cargo test --lib`（108 tests）、`bun run lint`、`bun run format`、格式化后再次 `bun run lint`、`bun run test`（28 files / 165 tests）及 `bun run build` 全部通过。arm64 Release APK 位于 `src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk`（12,416,687 bytes），通过 APK Signature Scheme v2 校验，并确认嵌入当前前端入口 JS/CSS；真机启动仍需人工安装验证。
+
+### Session #068 — 2026-07-23
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-23 |
+| **类型** | 双平台主机菜单、WebDAV 凭据草稿与平台隔离云同步 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:**
+
+- 路径栏主机菜单仍沿用桌面 292px / Android 224px 固定宽度，短名称和地址会留下大面积无效空间；现分别收紧为 248px / 184px，桌面继续保留连接/断开操作位，移动端改动仍由 `html.mobile-platform` 原生标记隔离
+- 全局状态栏每 30 秒刷新一次 Vault 状态；设置页收到新状态后无条件把尚未保存的 WebDAV URL、用户名覆盖为后端旧值，首次配置时即清空。Windows 与 Android 共用该轮询，因此两端都存在风险；现为凭据草稿记录逐字段编辑状态，轮询只填充未编辑字段，密码和已输入内容不再被后台状态刷新影响
+- WebDAV 云端载荷升级为 schema v2：顶层仅共享主机连接数据，每主机下载目录与其余 `AppSettings`、背景图片按 Rust `Platform` 分区；同步先解密并合并云端分区，只替换当前平台，恢复缺少当前平台条目时使用平台默认设置并恢复共享主机
+- 本地便携导入/导出继续保留完整单设备配置，不被 WebDAV 分区策略改变；旧云端 schema v1 没有平台身份，不能可靠归属外观和路径，因此只迁移可证明共享的主机，下一次同步自动写为 schema v2
+- 云端恢复继续保持 `enabled=false`，不会因恢复操作自动开启同步
+
+**验证:** `cargo fmt`、`cargo clippy --lib -- -D warnings`、`cargo test --lib`（105 tests）、`bun run lint`、`bun run format`、格式化后再次 `bun run lint`、`bun run test`（28 files / 164 tests）及 `bun run build` 全部通过。新增轮询不覆盖编辑草稿、双平台菜单宽度、平台分区合并、缺省恢复及旧 schema 迁移测试；Android/Windows WebDAV 实服往返仍需人工验证。
+
+### Session #067 — 2026-07-23
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-23 |
+| **类型** | Android/Windows 平台默认字号与双平台 Select 字体等级修复 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:**
+
+- Windows 的五档默认字号原本为正文 13px、标题 15px、标签 12px、提示 11px、数据 12px，实际样式与设置值一致；Android 原生样式却以 `!important` 将其中多档强制放大，导致卸载重装后的显示值与设置页不一致，且对应滑杆无法真正控制界面
+- 移除 Android 对全部排版令牌的 CSS 强制覆盖，并在 Rust 配置默认值中通过原生目标显式区分平台：Android 首次无配置时使用 15/20/14/11/13，Windows 继续保持 13/15/12/11/12；已有用户配置在两端均按保存值原样生效
+- 设置在 React 首帧渲染前完成加载，避免 Android 启动时短暂套用前端桌面占位默认值；`App` 内不再重复加载设置
+- 通用 Select 的主文字历史上固定为 10px、说明文字固定为 8px，绕过五级字体令牌；现分别绑定 `--type-body-size` 与 `--type-caption-size`，Interface language 及其他通用选择器在 Windows/Android 均遵循字体等级
+- Windows 默认提示字号未发生同类偏差，仍为 11px；共享修复只将原先过小的 Select 主文字恢复到正文等级，Android 平台默认值通过 Rust 目标判定隔离，未改变 Windows 的五档默认值
+
+**验证:** `cargo fmt --check`、`cargo clippy --lib -- -D warnings`、`cargo test --lib`（102 tests）、`bun run lint`、`bun run format`、格式化后再次 `bun run lint`、`bun run test`（27 files / 160 tests）及 `bun run build` 通过；新增 Android 五档字号无 CSS 覆盖、首帧预加载、双平台默认值及 Select 主/次文字等级映射断言。Android/Windows 最终视觉比例仍需双端人工复核。
+
+### Session #066 — 2026-07-23
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-23 |
+| **类型** | Android 抽屉性能与手势边界、双平台主机凭据布局 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:**
+
+- Android 路径栏主机下拉继承了桌面为连接/断开按钮扩展的 292px 信息宽度；移动端没有这些操作却仍覆写为 280px，现仅在原生移动平台收紧为 224px，Windows 继续保留 292px 操作空间
+- 路径栏下方按钮带的横向触摸会冒泡到 `app-shell` 全局抽屉手势；现为该原生移动滚动区增加抽屉手势排除标记与 `pan-x` 触摸策略，横向浏览操作按钮不再拉出主机抽屉
+- 主机抽屉拖动原先每次 `touchmove` 都更新 `AppInner` 顶层 React state，从而反复协调整个工作区组件树；现只在手势开始/结算时改变 React 状态，逐帧进度由 `requestAnimationFrame` 合并后直接更新 CSS 变量，并使用 `translate3d` 合成层完成位移
+- 仓库与生成 Android Activity/Manifest 未发现 90Hz 限制或刷新率偏好配置；120Hz 设备实际降到 90Hz 的具体原因仍需结合系统刷新率指示器、电池/性能模式和 WebView 帧时间在真机确认，不能仅凭 release/debug 类型归因
+- 添加/编辑主机的用户名/密码列比例由 6:6 改为 5:7；该项按需求同时作用于正常 Windows 桌面宽度和原生 Android 表单，极窄的非移动桌面窗口仍保留逐行响应式布局
+- Android 专项菜单宽度、手势排除与抽屉渲染路径继续由 `html.mobile-platform` 或运行时原生平台信号隔离；Windows 只共享明确要求的凭据字段比例调整
+
+**验证:** `bun run lint`、`bun run format`、格式化后再次 `bun run lint`、`bun run test`（27 files / 157 tests）及 `bun run build` 通过；新增 Android 菜单宽度、操作带手势排除、抽屉无逐帧 React state 更新和双平台 5:7 字段比例断言。Android 120/90Hz 显示模式与抽屉实际帧时间仍需新 release APK 真机复核。
+
+### Session #065 — 2026-07-23
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-23 |
+| **类型** | Windows 路径栏连接管理与 Android 弹层手势互斥 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:**
+
+- Windows 路径栏主机选择器原先由 `App` 传入预过滤后的 `connectedHosts`，组件层无法展示未连接主机；现桌面端读取全部保存主机，每项仅保留一个连接/断开操作，连接中显示忙碌态
+- 断开当前主机会卸载浏览面板，若侧栏同时隐藏便会失去重连入口；现 Windows 空面板路径栏继续挂载同一主机控件，可直接连接任意保存主机并打开对应面板
+- 路径栏和主机侧栏原先各自实现连接密码、解密失败重试及 SFTP TOFU 确认；现抽取 `useHostConnectionFlow` 作为唯一流程，避免两个入口产生安全或行为差异
+- Android 全局抽屉手势原先只排除文件拖动，React Portal 挂载的下拉、设置、确认框等弹层不会阻止主界面手势；现所有 Portal 统一标记活动遮罩，抽屉触摸开始、移动及结束阶段均检查门禁
+- 锚定下拉原先只监听桌面 `mousedown`，Android 点击主面板空白或在下拉中滑动时无法可靠收起；现使用捕获阶段 `pointerdown` 处理所有指针，并在原生移动平台触摸位移超过阈值时关闭
+- Windows 全主机连接操作仅在非 `mobile-platform` 分支渲染；Android 仍只显示已连接主机且不增加连接按钮，移动端新增逻辑仅为弹层手势门禁和触摸关闭
+
+**验证:** `bun run lint`、`bun run format`、格式化后再次 `bun run lint`、`bun run test`（27 files / 155 tests）及 `bun run build` 通过；Windows 全主机/空面板连接入口与 Android Portal 手势隔离均有自动化断言。Windows 实际下拉尺寸、Android 真机触摸关闭及各类系统弹层叠加效果仍需双端人工确认。
+
+### Session #064 — 2026-07-23
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-23 |
+| **类型** | 全平台拖放反馈与 Android 全局抽屉、面板及表单收敛 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:**
+
+- 当前目录拖放提示原先插入滚动容器并使用内描边，会参与滚动尺寸计算、触发滚动条且被表头/圆角裁切；现改为脱离布局的半透明模糊背景覆盖层和文字提示，不再绘制边框或改变盒子尺寸
+- Windows 普通文件行原先仅作为 `blocked` 落点阻止父面板命中，`drag-end` 又直接丢弃该类型；现普通文件行同时携带所在面板当前目录，落在文件上会按目标面板当前路径进入传输确认
+- Android 标题栏与主机侧栏原先各维护一套抽屉触摸状态；现统一提升为 `app-shell` 原生移动平台全局手势，整个应用区域实时左右拖动开关抽屉，并移除标题栏主机按钮和局部重复处理器
+- Android 连接后“双层盒子”并非同时存在两个面板组件，而是 `browser-page` 外壳内边距与内部工具栏/文件区边框叠加；现由单一外壳负责圆角和表面，内部区域取消重复边框与圆角
+- Android 主机编辑表单在通用窄屏规则下被强制逐项换行；现仅在 `html.mobile-platform` 下恢复 12 列比例：名称/标签 8:4、地址/端口 8:4、用户名/密码 6:6，协议标题与选择器同排
+- Android 主机抽屉底边改为跟随 38px/72px 状态栏实际占位并叠加底部安全区，列表增加底部滚动留白，避免末项被状态栏遮挡
+- 共享变更仅包含当前目录拖放语义与提示样式；抽屉、单层面板、表单和安全区均由 `html.mobile-platform` 或原生平台判定显式隔离，Windows 标题栏、主机表单和侧栏布局未改动
+
+**验证:** `bun run format`、`bun run lint`、`bun run test`（27 files / 152 tests）与 `bun run build` 通过；Windows/Android 自动化平台隔离断言通过，Android 全局手势、系统安全区及双端视觉效果仍需新 APK/Windows 实机人工确认。
+
+### Session #063 — 2026-07-22
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-22 |
+| **类型** | Android 实时抽屉手势、紧凑操作栏与跨平台滚动保持 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:**
+
+- 主机抽屉原先只在 `touchend` 判断方向，没有拖动过程状态；现将触摸位移映射为 0–1 连续进度，抽屉与遮罩随手指逐帧移动，并在松手时按方向和中点阈值停靠
+- 标题栏原先在抽屉打开时直接拒绝手势；现标题栏左半区在关闭状态右拖打开、打开状态左拖关闭，主机面板自身左拖关闭使用同一进度与结算规则
+- Android 主机抽屉改为完整覆盖标题栏与状态栏之间的工作区，移除外层 8px 空隙、边框、圆角和阴影，不再露出无连接空面板
+- Android 文件操作带由纵向 48px 弹性卡片收紧为 34px 图标+文字横排按钮，保持横向滚动并减少无效留白
+- 文件刷新不再卸载文件列表 DOM，因此 Android 与 Windows 均原位保留滚动位置；只有远程路径实际变化时才在布局阶段无动画归顶
+- Android 专项交互和样式继续由 `html.mobile-platform` 显式隔离；Windows 仅共享刷新滚动保持逻辑，桌面布局与手势未修改
+
+**验证:** `bun run format`、`bun run lint`、`bun run test`（27 files / 151 tests）与 `bun run build` 通过；应用内浏览器无法访问 Windows 本机回环预览，Android 真机触摸手感与 Windows 人工视觉回归待新 APK 验证。
+
+### Session #062 — 2026-07-22
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-22 |
+| **类型** | Android 拖放阈值、一体化文件面板与全宽主机抽屉 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:**
+
+- Android 目录碰撞原先只要求提示矩形与目录相交；现按提示框自身面积计算覆盖率，严格超过 50% 才显示目录落点提示
+- Android 路径区与文件区从两张独立圆角卡合并为一个连续面板：路径工具区仅保留顶部圆角，文件标题栏取消圆角，横向滚动操作带维持原触控风格
+- 主机抽屉扩展为与主面板相同的左右 8px 间距；主机卡片改为 44px 图标、清晰主副标题和三等分 42px 文字操作带
+- Android 主机抽屉支持左滑关闭；关闭时可从标题栏左半区右滑打开，水平距离与轴向比例共同过滤正常纵向滚动
+- Windows 与 Android 文件滚动容器在表头高度绘制同色底层，并将滚动条轨道透明化，消除滚动条占位造成的表头右侧空白
+- Windows 主机卡片默认光标由 grab 手形恢复为普通箭头；实际拖动中的 grabbing 状态保留
+
+**验证:** `bun run format`、`bun run lint`、`bun run test`（27 files / 147 tests）与 `bun run build` 通过。
+
+### Session #061 — 2026-07-22
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-22 |
+| **类型** | Android 双面板矩形拖放与移动界面状态收敛 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:**
+
+- 纠正 Session #060 的错误建模：落点不再是提示框底边附近的单点，而是与屏幕上文件名提示完全一致的矩形
+- Android 碰撞检测先按提示框矩形的重叠率选定上/下面板，再只在该面板内选择目录；空白区域明确映射到该面板当前目录，消除下方向上拖动时误命中另一面板末尾目录的问题
+- 面板当前目录增加整区高亮和文字提示；同主机显示移动，跨主机显示复制，目录行提示同步区分移动/复制
+- Android 路径工具区、文件滚动区和表头统一圆角边界；标题栏操作按钮移除残留的 hover/active/expanded 状态填充
+- Android 活动传输状态栏改用自适应两行高度，覆盖桌面固定 flex basis，避免传输卡片顶部被裁切
+- Windows 继续使用原有 pointerWithin 与桌面状态样式；平台隔离由源码回归测试覆盖，尚待 Windows/Android 实机视觉复核
+
+**验证:** `bun run format`、`bun run lint`、`bun run test`（27 files / 141 tests）与 `bun run build` 通过；ARM64 debug APK 已生成并通过 APK Signature Scheme v2 校验。
+
+### Session #060 — 2026-07-19
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-19 |
+| **类型** | Android 双面板文件拖动落点统一 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:**
+
+- Android 文件名提示位于手指左上方，但 dnd-kit 碰撞检测仍使用手指坐标，导致视觉提示进入另一面板时 `event.over` 仍命中原面板目录
+- 新增统一移动端落点：文件名提示底边中央下方 6px；目录高亮、面板识别和最终放置均使用该坐标
+- Windows 继续使用鼠标原始坐标，桌面拖放行为不变
+
+### Session #059 — 2026-07-19
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-19 |
+| **类型** | Android 拖动定位坐标修复 |
+| **参与者** | 用户 + AI |
+
+**根因与完成事项:**
+
+- 主机拖动 Overlay 原先位于带 `transform` 的移动 drawer 内，fixed 定位因此错误地以 drawer 为包含块；现仅在 Android 拖动期间通过 Portal 挂载到 `document.body`，恢复 dnd-kit 所需的视口坐标系
+- Android 文件拖动名称提示从触点右下方改到左上方 14px，避免被手指遮挡；Windows 保留原鼠标右下提示位置
+
+### Session #058 — 2026-07-19
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-19 |
+| **类型** | Android 拖动、操作带、触摸选择与公共下载目录修复 |
+| **参与者** | 用户 + AI |
+
+**完成事项:**
+
+- Android 主机排序浮层改为继承激活卡片的真实尺寸，避免长按激活时预览突然跳到手指下方；桌面排序行为不变
+- 将刷新、上传补回 Android 文件操作带，并保留基于选择的文件操作
+- 在移动平台事件边界禁用桌面橡皮筋框选，同时增加 `pointercancel` 清理，避免残留高亮选区
+- 新增 Android 专用 MediaStore 插件：下载先写入应用私有暂存区，再发布到公共 `Download/SY-TFM`；未申请失效的旧存储权限或受限的全盘访问权限
+
+**验证:** `bun lint`、`bun run format`、`bun test`（138 项通过）、桌面 `cargo check`、arm64 Android debug APK 构建均通过。
+
+### Session #057 — 2026-07-19
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-19 |
+| **类型** | Android 文件选择操作带、触摸拖动反馈与移动表格重构 |
+| **参与者** | 用户 + AI |
+
+**根因:**
+
+- Android 右键菜单被屏蔽后没有替代操作入口；文件选择仍沿用桌面 Ctrl/Shift 语义，缺少可发现的多选方式
+- 触摸拖动启动事件不是 `MouseEvent`，导致文件拖动预览坐标为空；主机排序没有移动 Overlay，源卡片只在原位降低透明度
+- 移动端最后声明的 hover 清理规则覆盖了选中背景，仅留下桌面选中态的左侧指示线
+- 面包屑编辑按钮仍参与 flex 流；Owner/Permissions 仍由能力位驱动显示，没有移动端列裁剪
+- 将目录拖到自身/子目录时前端主动发布错误状态，而该无效落点更适合静默忽略
+
+**完成事项:**
+
+- Android 路径栏下新增可横向滑动的选择操作带：下载、重命名、删除、新建文件、新建文件夹、在线编辑；操作按选择数量与文件类型启停
+- 移动端隐藏 Remote Edit 会话入口，Windows Remote Edit、右键菜单与原有路径操作保持不变
+- 文件行及表头增加 Android 复选框，支持显式多选/全选；选中行恢复完整强调色背景
+- Android 文件表格固定为复选框 + Name（含类型图标）+ Size + Modified，隐藏 Owner/Permissions
+- 路径编辑按钮改为路径胶囊右侧绝对定位；文件触摸拖动补齐 TouchEvent 坐标和实时名称预览
+- Android 主机排序使用 DragOverlay 展示实际移动卡片，原位置源卡片在拖动期间隐藏
+- 目录拖到自身或子目录时直接忽略，不再产生错误状态
+
+**验证:**
+
+- `bun lint`、`bun format`、`bun test`（26 files / 138 tests）通过
+- Android 选择操作、复选框、三列布局、触摸预览、主机 Overlay 与平台隔离回归测试通过
+- TypeScript/Vite 生产构建与 ARM64 Android debug APK 重建通过
+
+### Session #056 — 2026-07-19
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-19 |
+| **类型** | Android 路径栏、主机操作、触摸拖拽与状态栏修复 |
+| **参与者** | 用户 + AI |
+
+**根因:**
+
+- 移动端仍把主机选择、完整面包屑和桌面操作按钮挤在同一行，主机名与路径编辑入口相互压缩
+- 主机操作依赖桌面 `hover` 才显示；主机与文件拖动只注册 PointerSensor，Android 长按同时进入应用右键菜单流程
+- 空的传输状态节点仍占据移动状态栏第二个网格列，使连接数与文件数被排到不同行
+- 标签筛选器外层字号已放大，但内部 `strong` 仍命中桌面 10px 规则
+
+**完成事项:**
+
+- Android 路径工具栏改为上下两层：首层固定保留主机选择与圆角路径胶囊，路径胶囊增加明确的触摸编辑按钮；第二层均匀排列文件操作
+- Android 主机卡片的编辑、连接/断开、删除按钮改为常显触控目标；桌面仍保持悬浮显示
+- 主机排序和文件拖动在 Android 触摸上改用 320ms 延迟 TouchSensor；Windows 与其他指针继续使用原 PointerSensor，Android 长按不再打开应用右键菜单
+- 放大 All Tags 当前值与下拉选项字号/行高，并限制长列表为可滚动高度
+- 移动状态栏隐藏空传输列，连接数与文件数固定在同一网格行；活动传输单独占下一行
+- 新增 Android 路径、触摸拖拽、操作按钮与状态栏平台隔离回归测试
+
+**验证:**
+
+- `bun lint`、`bun format`、`bun test`（26 files / 136 tests）通过
+- TypeScript/Vite 生产构建与 ARM64 Android debug APK 构建通过
+- APK：`src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`
+
+### Session #055 — 2026-07-19
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-19 |
+| **类型** | Android Keystore 持久化与云端恢复语义修复 |
+| **参与者** | 用户 + AI |
+
+**根因:**
+
+- `keyring 3.6.3` 没有 Android backend；Android target 自动落入仅单个 `Entry` 生命周期有效的 mock store，导致每次操作生成不同设备主密钥
+- 设置页保存 Backup Password 后会清空输入框，Restore 随后读取本机密文；旧 mock 主密钥无法再次取得，因此错误被归类为“密码错误或备份损坏”
+- Restore 后端显式写入 `enabled: true`，错误地把一次性本地恢复变成了自动同步启用操作
+
+**完成事项:**
+
+- 新增项目内 `plugins/secure-storage` Tauri Android 插件：使用 Android Keystore 中不可导出的 AES-GCM Key 加密 SharedPreferences 内的设备主密钥和 Vault Key
+- Android 不再编译或调用 `keyring` mock backend；Windows/macOS/Linux/iOS 保持原有 `keyring` 原生实现不变
+- 同步状态现在会实际验证本机受保护密码是否可读；旧 Android mock 密文显示为未保存，引导用户重新输入，而不再误报云端文件损坏
+- 从云端恢复后保存 WebDAV/Vault 元数据但保持 `enabled = false`；仅显式点击启用/恢复同步才会上传
+- 同步修正 AGENTS 与架构文档中的平台密钥存储说明
+
+**验证:**
+
+- `bun lint`、`bun format`、`bun test`（26 files / 133 tests）通过
+- `cargo fmt --check`、Rust lib 101 tests、Clippy `-D warnings` 通过
+- Android Keystore Kotlin 插件、ARM64 Rust 库、debug APK 与 AAB 完整构建通过
+
+### Session #054 — 2026-07-19
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-19 |
+| **类型** | Android 移动排版重构与桌面隔离回归 |
+| **参与者** | 用户 + AI |
+
+**完成事项:**
+
+- 移除 Android 标题栏硬编码的 28px 顶部留白，改为仅消费真实安全区；标题栏压缩为 48px 内容高度并清除桌面分组边框与竖分隔线
+- 未选择主机时移除占满屏幕的容器边框与冗余路径栏，将空状态改为靠上、使用移动正文比例的轻量引导区
+- 主机 Drawer 收窄至最多 310px，缩短筛选器和主机行触控高度，同时提高主机副文本可读性，改善内容密度
+- 主机新增/编辑弹窗按动态视口垂直居中；底部测试、取消、创建/保存保持同一行，连接测试结果改为浮在操作栏上方
+- 设置中心改为顶部横向分类导航和单列内容卡；WebDAV 与其他长文本操作按钮改为移动端全宽排列，允许安全换行且不再横向溢出
+- 新增空状态语义类和平台隔离断言；所有视觉覆盖继续限定在 `html.mobile-platform`，Windows 仅获得无样式副作用的语义 class
+
+**验证:**
+
+- `bun lint`、`bun format`、`bun test`（26 files / 131 tests）全部通过
+- TypeScript/Vite 生产构建通过；平台隔离测试确认 Android 样式仍依赖 Rust 原生移动平台信号
+- ARM64 Android debug APK 与 AAB 重建成功，真机视觉待用户复验
+
+### Session #053 — 2026-07-19
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-19 |
+| **类型** | Android 平台隔离、安全区与存储路径修复 |
+| **参与者** | 用户 + AI |
+
+**完成事项:**
+
+- 修正仅按 767px 断点启用移动壳层的错误，改由 Rust `cfg!(mobile)` 原生判定注入平台标记；Android 专项样式不再进入 Windows
+- Android viewport 启用 `viewport-fit=cover`，标题栏按安全区 inset 增加顶部空间，Drawer 与遮罩同步避让系统状态栏
+- 移动触屏覆盖桌面 hover 视觉，清除点击后粘滞的位移、滤镜、背景与阴影状态，同时保留 selected/pressed 语义
+- Tauri 启动时注入 `app_data_dir`，Android 设置与路径查询不再依赖不支持移动端的 `directories::ProjectDirs`
+- 在 AGENTS.md 增加“平台适配零回归”硬约束：必须原生平台隔离，禁止只按视口宽度推断平台
+
+**验证:**
+
+- Windows 前端 lint、TypeScript/Vite 生产构建通过；平台隔离与桌面启动专项测试 27/27 通过
+- Rust 单元测试 101/101 通过；ARM64 Android debug APK 重建成功
+- 完整 `bun test` 仍仅受已知 Bun 1.3.14 Tauri 插件解析问题阻塞，其余 119 项通过
+
+
+### Session #052 — 2026-07-19
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-19 |
+| **类型** | Android 移动壳层与自适应图标首轮适配 |
+| **参与者** | 用户 + AI |
+
+**完成事项:**
+
+- Android 窄屏壳层改为移动文件台：简化标题栏，增加主机 Drawer 入口，保留刷新、主题、设置与单双面板控制
+- 主机列表在移动端改为遮罩式 Drawer；选择主机后自动收起
+- 双面板在移动端由左右并排改为上下堆叠，不再隐藏第二面板；移动端提高正文字号、数据字号与触控目标尺寸
+- Android 启动器图标增加 72% 安全区留白；重新构建后 APK manifest 已使用 `mipmap-anydpi-v26/ic_launcher.xml` 自适应图标
+
+**验证:**
+
+- `bun format`、`bun lint`、前端 TypeScript/Vite 生产构建通过
+- ARM64 debug APK 成功生成，APK 仅包含 `arm64-v8a` 原生库；待 Android 12+ 真机视觉与交互验收
+- `bun test` 保持已知的 Bun 1.3.14 对 Tauri 插件顶层 `exports` 解析失败，Node 22 可解析相同依赖；与本次改动无关
+
+
+### Session #051 — 2026-07-19
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-19 |
+| **类型** | Android Phase 3 初始化与平台基线调整 |
+| **参与者** | 用户 + AI |
+
+**完成事项:**
+
+- 已生成 Tauri Android 原生工程，并安装 `aarch64-linux-android` Rust target
+- 根据用户明确的本地 SDK 基线，将 Android 最低支持版本从 API 26 提升为 Android 12（API 31）
+- 同步更新项目权威约束、需求文档、Tauri 持久化配置与本机生成的 Android Gradle 配置
+- 使用项目的橙色应用源图重新生成全平台图标，并重新初始化 Android 工程，修复 Android 工程误用 Tauri 默认启动器图标的问题
+
+**验证:**
+
+- 前端 Vite 生产构建通过
+- 已在本地成功完成 Android Rust 交叉编译，生成通用 debug APK 与 AAB；尚未进行真机安装验证
+- 已生成 ARM64 release APK；该文件未签名，`apksigner` 验证确认无法安装，待配置用户自管 Android keystore 后重新构建
+- `bun lint` 与 `bun format` 通过；`bun test` 被 Bun 1.3.14 对 `@tauri-apps/plugin-dialog` / `@tauri-apps/plugin-opener` 的顶层 `exports` 解析失败阻塞。Node 22 可解析相同依赖，确认与本次 Android 配置无关。
 
 ### Session #050 — 2026-07-19
 
@@ -1780,7 +2334,111 @@ Phase 0 任务 0.4 配置：
 
 **理由:** 分层后日常连接继续享受系统凭据库的无感保护，云端只获得端到端加密密文；备份密码不上传，也不需要改变现有主机模型的本地安全语义。
 
-**影响:** 新增 Vault Key 系统凭据条目、便携数据模型、revision 冲突检查和 WebDAV 自动同步。完整配置、TOFU 指纹和背景图片均随保险库迁移；首次在新设备恢复仍需手动提供 WebDAV 引导凭据和备份密码。
+**影响:** 新增 Vault Key 系统凭据条目、便携数据模型、revision 冲突检查和 WebDAV 自动同步。完整配置、TOFU 指纹和背景图片的云端归属后续由 ADR-019 收紧为“主机共享、其余按平台分区”；首次在新设备恢复仍需手动提供 WebDAV 引导凭据和备份密码。
+
+---
+
+### ADR-017 — Android 最低版本设为 Android 12（API 31）
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-19 |
+| **状态** | ✅ 已接受 |
+| **决策者** | 用户 + AI |
+
+**背景:** 项目原先声明 Android 8（API 26）为最低版本，但用户本地 Android SDK 的可用最低平台为 Android 12（API 31），且明确选择不再覆盖 Android 8–11。
+
+**决策:** Android 应用通过 `bundle.android.minSdkVersion` 将 `minSdk` 设为 31；项目文档与本机生成的 Android Gradle 工程保持一致。
+
+**影响:** Android 8–11（API 26–30）设备无法安装后续 APK。Android 12 及更高版本成为本项目的最低 Android 支持基线。
+
+---
+
+### ADR-018 — 平台专项适配必须原生隔离且零回归
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-19 |
+| **状态** | ✅ 已接受 |
+| **决策者** | 用户 + AI |
+
+**背景:** Android 首轮适配仅以视口宽度启用移动壳层，导致窄窗口 Windows 同时获得 Android 标题栏、Drawer 和字号覆盖，破坏既有桌面基线。
+
+**决策:** 平台专项功能必须先通过 Rust 编译目标或 Tauri 原生平台能力判定，再叠加响应式断点；视口宽度只负责同一平台内的布局变化，不得承担平台识别。任何专项适配必须验证目标平台与至少一个既有平台不发生回归。
+
+**影响:** 前端由后端 `cfg!(mobile)` 注入移动平台标记；Android 样式只能在该标记下生效。后续 iOS、Android 文件系统、系统栏、生命周期与触控交互均遵循同一隔离规则。
+
+---
+
+### ADR-019 — WebDAV 云端设置按平台分区
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-23 |
+| **状态** | ✅ 已接受 |
+| **决策者** | 用户 + AI |
+
+**背景:** Windows 与 Android 的屏幕、路径和视觉参数不同；把完整 `AppSettings` 当作一份全局配置同步会让一端的字号、背景、下载目录等覆盖另一端。旧云端载荷也没有记录设置来源平台。
+
+**决策:** WebDAV 解密载荷升级为 schema v2，顶层只共享 `RemoteHost` 中的远端连接数据；每主机下载目录及其余设置和背景图片按 `Platform` 保存。同步采用“读取—解密—合并—写回”，更新共享主机和当前平台分区，保留其他平台分区。恢复缺少当前平台分区时使用平台默认值。旧 schema v1 只迁移主机连接数据并清除未标记平台的下载目录，避免猜测设置归属。本地便携备份保持完整单设备语义。
+
+**理由:** 主机连接资料具备跨平台价值，而界面、路径、窗口与背景天然属于运行平台。显式平台键比路径或设备特征推断可靠，也符合平台适配零回归约束。
+
+**影响:** Windows/Android 后续同步互不覆盖外观和路径；首次从旧 v1 云端恢复仅获得主机与当前平台默认设置，下一次同步创建当前平台分区。外层 `vault.v1` 加密格式、Vault Key、备份密码和 WebDAV 固定路径不变。
+
+---
+
+### ADR-020 — WebDAV 使用平台作用域指纹进行增量同步
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-24 |
+| **状态** | ✅ 已接受 |
+| **决策者** | 用户 + AI |
+
+**背景:** schema v2 已按平台隔离设置，但同步仍无条件上传并增加 revision；任一平台更新也会让其他平台因云端 revision 较新而冲突，无法区分“共享/本平台数据变化”和“只有其他平台变化”。
+
+**决策:** 每个设备在本地用 `lastSyncedHostsHash` 与 `lastSyncedPlatformHash` 分别缓存共享主机和当前 `Platform` 条目的 SHA-256 指纹，保留 `lastSyncedScopeHash` 兼容旧检查点。同步下载并解密云端文档后，对两个作用域分别做三方比较：本地等于检查点则拉取远端，远端等于检查点则推送本地，两个不同作用域允许在同一轮双向合并，只有同一作用域两端同时变化才返回冲突。上传 revision 以本机和云端较大值为基准递增。
+
+**理由:** 只比较整份 schema v2 会把 Android 条目变化误判为 Windows 变化；只比较本地缓存又无法发现远端并发修改。平台作用域三方比较同时满足无变化零上传、跨平台互不干扰和共享数据冲突保护。
+
+**影响:** 重复点击 Sync now 不再制造空 revision；其他平台新增/修改主机可由 30 秒检查自动拉取，同时保留本平台独立外观变化。主机变更 1.5 秒快速触发，设置项只在设置关闭、应用进入后台或周期检查时核对。旧配置通过组合指纹迁移独立指纹，无法证明基线时保持保守冲突。缓存仅为不可逆 SHA-256，不保存云端明文。
+
+---
+
+### ADR-022 — WebDAV 配置与平台背景资源分离压缩
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-24 |
+| **状态** | ✅ 已接受 |
+| **决策者** | 用户 + AI |
+
+**背景:** schema v2 把平台背景原始字节转换为 Base64 后内嵌进加密配置，单张约 6 MiB 的图片会令 `.sytfm` 增长到约 8 MiB；任何主机或平台设置更新都会重新加密并上传图片。Android 本地显示还通过同样的 Data URL/IPC 路径搬运整图，路径虽已稳定但大图无法可靠显示。
+
+**决策:** WebDAV schema 升级为 v3。加密主文件只保存共享主机、平台设置及背景资源索引，平台图片以内容寻址的 `background-<platform>-<sha256>.gz` 独立存放。索引包含安全文件名、远端资源名、SHA-256 与原始大小；背景路径不进入云端。更新时先上传新资源、再提交配置、最后清理旧资源。配置明文 JSON 在 AES-256-GCM 前做 gzip，文档用可选 `payloadEncoding` 标识；旧未压缩 `vault.v1`、schema v2 内嵌背景和 schema v1 主机迁移路径继续保留。
+
+**理由:** 密文不可有效压缩，因此压缩必须发生在加密前。资源分离后，主机变化只上传很小的配置文件；背景只有摘要变化或远端文件缺失时才上传。图片本身不按敏感配置加密，但其摘要和引用仍在认证加密的配置里，恢复时可检测篡改。
+
+**影响:** `/SY-TFM` 不再只有 `sy-tfm-vault.sytfm`，设置过背景的平台会出现自己的 `.gz` 文件；正常提交后每个平台仅保留当前摘要对应的一个压缩包，失败重试窗口可能暂存新旧两个。JPEG/PNG 等本身已压缩格式的 gzip 体积收益可能有限，但不会再产生 Base64 膨胀或重复上传。Android 界面通过原始二进制 IPC 创建短生命周期 Blob URL，Windows 背景继续使用 Data URL，平台渲染链路互不影响。旧客户端不能理解 schema v3 的资源索引，新客户端仍可读取旧云端和旧便携备份。
+
+---
+
+### ADR-021 — Android Photo Picker 媒体立即导入应用私有存储
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-07-24 |
+| **状态** | ✅ 已接受 |
+| **决策者** | 用户 + AI |
+
+**背景:** Android Photo Picker 返回 `content://` URI，既没有可靠文件扩展名，也不是 Rust `std::fs` 可访问的路径；直接持久化 URI 还会把临时授权生命周期带入启动与云同步流程，造成选择后无反应、重开设置才报错等不确定行为。
+
+**决策:** 前端只把 Photo Picker URI 作为一次性导入句柄。Android 原生存储插件使用 `ContentResolver` 获取 MIME 并流式复制到应用私有 `files/backgrounds`，限制 20MB 和已支持图片类型；成功后 `AppSettings.backgroundImagePath` 只保存复制后的稳定路径。桌面普通文件路径保持原流程，Android 不为背景图片申请媒体库或全盘存储权限。
+
+**理由:** 立即复制消除 URI 授权、扩展名与重启生命周期差异，同时使现有 Rust 图片读取、便携备份及 WebDAV 平台分区序列化继续只处理普通文件。相比长期持有 URI 权限，应用私有副本的删除、替换与安全边界更明确。
+
+**影响:** Android 每次选择背景会替换上一个私有背景副本；原始媒体删除或设备重启不影响已经导入的背景。旧配置若遗留不可读 `content://` 不再触发失焦重复报错，用户重新选择后即迁移到稳定路径。
 
 ---
 
@@ -1887,14 +2545,14 @@ Phase 0 任务 0.4 配置：
 
 | # | 任务 | 状态 | 依赖 | 预估 | 实际 | 备注 |
 |---|------|------|------|------|------|------|
-| 3.1 | 初始化 Tauri Android 项目 | ⬜ | 0.1 | 4h | — | |
+| 3.1 | 初始化 Tauri Android 项目 | ✅ | 0.1 | 4h | — | `src-tauri/gen/android` 已生成；最低版本为 API 31 |
 | 3.2 | 初始化 Tauri iOS 项目 | ⬜ | 0.1 | 4h | — | |
-| 3.3 | 验证 russh + reqwest 移动端交叉编译 | ⬜ | 0.6 | 6h | — | 关键验证 |
+| 3.3 | 验证 russh + reqwest 移动端交叉编译 | ✅ | 0.6 | 6h | — | 已生成通用 debug APK 与 AAB；真机运行仍待验证 |
 | 3.4 | 实现移动端密钥存储 | ⬜ | 0.9 | 6h | — | |
 | 3.5 | 实现移动端文件系统适配 | ⬜ | 0.8 | 4h | — | |
-| 3.6 | 实现 ResponsiveLayout 响应式布局 | ⬜ | 0.12 | 6h | — | |
+| 3.6 | 实现 ResponsiveLayout 响应式布局 | 🟡 | 0.12 | 6h | — | 移动标题栏、字号与上下双面板首轮完成，待真机验收 |
 | 3.7 | 实现 MobileTabBar 底部导航 | ⬜ | 3.6 | 4h | — | |
-| 3.8 | 实现 Drawer 侧栏抽屉 | ⬜ | 3.7 | 4h | — | |
+| 3.8 | 实现 Drawer 侧栏抽屉 | 🟡 | 3.7 | 4h | — | 主机 Drawer 首轮完成，待真机交互验收 |
 | 3.9 | 实现移动端文件列表（Card 样式） | ⬜ | 3.6 | 6h | — | |
 | 3.10 | 实现滑动操作 | ⬜ | 3.9 | 6h | — | |
 | 3.11 | 实现长按多选模式 | ⬜ | 3.9 | 4h | — | |
@@ -2023,6 +2681,25 @@ Phase 0 任务 0.4 配置：
 | P50 | 2026-07-19 | 直接复制 EXE 仍会落到系统 AppData，无法形成可控的绿色版数据根 | Windows 便携分发 | ✅ 已解决 | 同级标记启用 `data/` 根目录；敏感凭据仍须经加密保险库恢复 | 2026-07-19 |
 | P51 | 2026-07-19 | 便携 EXE 启动后只有后台进程，隐藏主窗口始终不显示 | Windows 启动 | ✅ 已解决 | 移除隐藏 WebView 上不会稳定执行的双层 animation frame，React 挂载后立即调用原生 show | 2026-07-19 |
 | P52 | 2026-07-19 | 重复执行 EXE 会创建多个独立 Tauri runtime 与主窗口 | 桌面进程生命周期 | ✅ 已解决 | 桌面端首个插件注册 single-instance；后续启动只还原并聚焦现有窗口 | 2026-07-19 |
+| P53 | 2026-07-19 | Android 路径栏被桌面操作挤压，长按触发右键菜单且状态栏空列造成错行 | Android 文件浏览交互 | ✅ 已解决 | 两层移动路径栏、常显主机操作、延迟 TouchSensor、移动右键抑制与显式状态网格区域 | 2026-07-19 |
+| P54 | 2026-07-19 | Android 禁用右键后缺少文件操作入口，触摸拖动无预览且表格仍显示桌面列 | Android 文件选择与操作 | ✅ 已解决 | 选择驱动操作带、显式复选框、三列移动表格、TouchEvent 预览与主机 DragOverlay | 2026-07-19 |
+| P55 | 2026-07-22 | Android 文件提示与碰撞几何不一致，跨上下双面板空白落点会误命中另一面板目录 | Android 双面板拖放 | ✅ 已解决 | 完整提示矩形碰撞、面板优先仲裁、当前目录高亮与跨主机复制提示 | 2026-07-22 |
+| P56 | 2026-07-22 | Android 目录边缘接触即高亮、路径与列表割裂，移动主机操作目标过小 | Android 文件与主机交互 | ✅ 已解决 | 50% 目录覆盖阈值、一体化面板、全宽可滑动抽屉与大尺寸文字操作带 | 2026-07-22 |
+| P57 | 2026-07-22 | Android 抽屉只在松手后跳变且外层露底，目录刷新会销毁滚动容器并回顶 | Android 抽屉与全平台文件刷新 | ✅ 已解决 | 连续拖动进度、全覆盖抽屉、紧凑横向操作栏与保留 DOM 的无感刷新 | 2026-07-22 |
+| P58 | 2026-07-23 | 当前目录拖放边框触发滚动/裁切且桌面文件落点失效，Android 抽屉手势、面板层级、主机表单与底部安全区不统一 | 全平台拖放与 Android UI | ✅ 已解决 | 无边框模糊覆盖层、文件行当前目录映射、全局单一抽屉手势、单层面板及 Android 专项表单/安全区 | 2026-07-23 |
+| P59 | 2026-07-23 | Windows 路径栏仅能切换已连接主机，Android Portal 弹层无法阻止全局抽屉手势且触摸外部不收起 | Windows 连接入口与 Android 弹层交互 | ✅ 已解决 | 桌面全主机单操作下拉、空面板重连入口、共享安全连接流程及 Portal 活动遮罩门禁 | 2026-07-23 |
+| P60 | 2026-07-23 | Android 主机下拉过宽、横向操作带误触抽屉，抽屉逐帧顶层渲染造成卡顿风险 | Android 菜单与抽屉性能 | ✅ 已解决 | 224px 移动菜单、滚动区手势排除、rAF 合并 CSS 变量更新及合成层位移 | 2026-07-23 |
+| P61 | 2026-07-23 | Android 五档字号被平台 CSS 强制覆盖，通用 Select 主文字固定 10px 未接入字体等级 | 全局排版 | ✅ 已解决 | 原生目标区分平台默认值、移除移动字号覆盖、首帧预加载，Select 主/次文字绑定正文与提示令牌 | 2026-07-23 |
+| P62 | 2026-07-23 | 主机菜单空白过多、Vault 30 秒轮询清空未保存凭据字段，云端完整设置跨平台互相覆盖 | 双平台 UI 与云同步 | ✅ 已解决 | 248/184px 菜单、编辑感知凭据草稿、共享主机 + Platform 设置分区的云端 schema v2 | 2026-07-23 |
+| P63 | 2026-07-24 | Windows 主机菜单仍偏宽、开发 APK 离线启动缺少资源、Sync now 无变化也上传且跨平台 revision 误冲突 | Windows UI、Android 构建与云同步 | ✅ 已解决 | 196px + 纯图标操作、Release 资源/签名验证、平台作用域 SHA-256 三方比较 | 2026-07-24 |
+| P64 | 2026-07-24 | Android 抽屉松手偶发跳变、Photo Picker URI 无法读取、文本菜单/Autofill 缺失且大面积玻璃模糊增加 GPU 负担 | Android 交互、存储与性能 | ✅ 已解决 | 独立 settle 动画、ContentResolver 私有导入、文本菜单放行与表单 Autofill 语义、移动端取消全屏 blur | 2026-07-24 |
+| P65 | 2026-07-24 | Android 私有背景经 Base64 IPC 回传后未显示，云端平台配置内嵌背景导致主文件膨胀和重复上传 | Android 背景与 WebDAV 云同步 | ✅ 已解决 | Asset Protocol 受限读取、schema v3 内容寻址平台背景压缩包、配置 gzip 后加密及摘要增量上传 | 2026-07-24 |
+| P66 | 2026-07-24 | 曾推测 Android 背景仅因 Asset Protocol scope 少一层 `files` 而失败 | Android 背景显示 | ⚪ 已替代 | scope 修正经真机反馈仍不生效；P67 移除该渲染依赖并改用二进制 Blob | 2026-07-24 |
+| P67 | 2026-07-24 | Android 背景仍不显示且关闭闪白、周期同步不访问云端、在线编辑不能滚动、设置首次打开卡顿 | Android 渲染、跨平台同步与共享 UI | ✅ 已解决 | 二进制 Blob 背景、独立作用域三方合并、CodeMirror 滚动容器与空闲预加载 | 2026-07-24 |
+| P68 | 2026-07-24 | 同扩展名 Android 背景路径不变、CodeMirror scroller 被裁切、轮询闪屏且整体主机哈希无法合并并发记录 | Android 背景、编辑器、Windows 刷新与云同步 | ✅ 已解决 | 内容寻址导入、可收缩 scroller、静默主机刷新及加密快照逐 UUID 三方合并 | 2026-07-24 |
+| P69 | 2026-07-24 | CodeMirror 文本存在但视口高度为 0，Android 窄屏规则误隐藏 WebDAV 状态 | Android 编辑器与状态栏 | ✅ 已解决 | 稳定宿主类逐级高度约束、真实 scroller 滚动及原生平台状态显式恢复 | 2026-07-24 |
+| P70 | 2026-07-25 | 编辑器关闭后全局状态残留，Android Vault 状态被底栏压缩且横屏进入不可用桌面布局 | 全平台编辑状态与 Android 顶栏 | ✅ 已解决 | 消息所有权清理、移动标题栏 Vault 胶囊、可调应用栏高度及 API 36 竖屏兼容策略 | 2026-07-25 |
+| P71 | 2026-07-25 | Android 顶栏高度下限偏高，Vault 胶囊日期偏小且右侧空间利用不足 | Android 标题栏 | ✅ 已解决 | 32px 自适应下限、日期等宽放大与右侧语义同步状态灯 | 2026-07-25 |
 
 ---
 
@@ -2043,7 +2720,7 @@ Phase 0 任务 0.4 配置：
 | M2.1 — 远程编辑可用 | Phase 2 | — | 2026-07-17 | ✅ | Online Edit + Remote Edit |
 | M2.2 — 跨协议传输可用 | Phase 2 | — | 2026-07-15 | ✅ | 双面板拖拽 + 本地临时文件递归中转 |
 | M2.3 — 桌面端功能完整 | Phase 2 | — | 2026-07-18 | ✅ | Windows v1.0.0 自动化基线；实机矩阵持续补充 |
-| M3.1 — Android 真机运行 | Phase 3 | — | — | ⬜ | |
+| M3.1 — Android 真机运行 | Phase 3 | — | 2026-07-19 | ✅ | ARM64 Android 12+ 真机安装与运行已验证 |
 | M3.2 — iOS 真机运行 | Phase 3 | — | — | ⬜ | |
 | M4.1 — 性能达标 | Phase 4 | — | — | ⬜ | |
 | M4.2 — UI 打磨完成 | Phase 4 | — | — | ⬜ | |
@@ -2097,6 +2774,28 @@ Phase 0 任务 0.4 配置：
 | v1.39 | 2026-07-19 | 完成便携运行时数据根、ZIP 构建脚本与深色橙色 NSIS 安装器皮肤 | AI |
 | v1.40 | 2026-07-19 | 修复便携版隐藏窗口启动死锁并将产物统一到 Tauri bundle 目录 | AI |
 | v1.41 | 2026-07-19 | 增加备份密码可视确认与桌面单实例激活行为 | AI |
+| v1.42 | 2026-07-19 | 重构 Android 顶栏、空状态、主机抽屉、设置中心与主机弹窗排版 | AI |
+| v1.43 | 2026-07-19 | 修复 Android Keystore 持久化并将云端恢复改为默认暂停同步 | AI |
+| v1.44 | 2026-07-19 | 重构 Android 路径工具栏、长按拖拽、主机操作与底部状态栏 | AI |
+| v1.45 | 2026-07-19 | 完成 Android 文件选择操作带、复选框三列表格与触摸拖动反馈 | AI |
+| v1.46 | 2026-07-22 | 修复 Android 矩形拖放仲裁、当前目录反馈、圆角表面与传输状态裁切 | AI |
+| v1.47 | 2026-07-22 | 完成 Android 目录覆盖阈值、一体化文件面板、全宽手势抽屉及共享表头轨道修复 | AI |
+| v1.48 | 2026-07-22 | 完成 Android 实时抽屉、全覆盖主机层、紧凑操作栏及跨平台刷新滚动保持 | AI |
+| v1.49 | 2026-07-23 | 完成无边框跨面板拖放反馈、Windows 文件落点修复及 Android 全局抽屉、单层面板、主机表单与安全区收敛 | AI |
+| v1.50 | 2026-07-23 | 完成 Windows 路径栏全主机连接管理、空面板重连入口与 Android 弹层手势互斥 | AI |
+| v1.51 | 2026-07-23 | 收紧 Android 主机下拉与操作带手势边界，优化抽屉逐帧渲染，并调整双平台主机凭据字段比例 | AI |
+| v1.52 | 2026-07-23 | 修复 Android 五档字号覆盖与启动偏差，隔离双平台默认值，并让通用下拉遵循正文与提示字体等级 | AI |
+| v1.53 | 2026-07-23 | 收紧双平台主机菜单，修复 Vault 轮询覆盖输入，并完成主机共享、其余设置按平台隔离的云端 schema v2 | AI |
+| v1.54 | 2026-07-24 | 收紧 Windows 主机菜单为纯图标操作，确认 Android 离线 Release 资源，并实现 WebDAV 平台作用域指纹增量同步 | AI |
+| v1.55 | 2026-07-24 | 修复 Android 抽屉收尾动画、Photo Picker 背景导入、文本选择/Autofill，并降低 WebView 全屏模糊合成成本 | AI |
+| v1.56 | 2026-07-24 | 修复 Android 私有背景显示，并将 WebDAV 平台背景拆分为摘要索引和独立 gzip 增量资源 | AI |
+| v1.57 | 2026-07-24 | 改用 Android 二进制 Blob 背景，完成 WebDAV 双向轮询、编辑器滚动与设置首开预热 | AI |
+| v1.58 | 2026-07-24 | 修复 Android 背景热切换与编辑器真实滚动，恢复抽屉毛玻璃，完成静默轮询、逐主机三方合并及移动滑块方向锁 | AI |
+| v1.59 | 2026-07-24 | 真机修复 Android 在线编辑器零高度视口，并恢复底部 WebDAV 当前同步状态 | AI |
+| v1.60 | 2026-07-25 | 修复编辑状态残留，将 Android Vault 状态移入可调标题栏并加入可持久化竖屏构建策略 | AI |
+| v1.61 | 2026-07-25 | 将 Android 顶栏下限降至 32px，并放大 Vault 日期、增加同步状态灯 | AI |
+| v1.62 | 2026-07-25 | 让 Android 主机抽屉随工作区动态等尺寸，统一圆角间距并移除滑动渐变底色 | AI |
+| v1.63 | 2026-07-25 | 修复 Android 主机抽屉关闭后在左侧间距短暂残留的问题 | AI |
 
 ---
 
