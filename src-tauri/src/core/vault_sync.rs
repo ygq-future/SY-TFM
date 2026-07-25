@@ -1,10 +1,16 @@
 //! 跨设备保险库编排：本机设备加密、便携 Vault 与 WebDAV Adapter 之间的边界。
 
+use std::collections::{HashMap, HashSet};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex as StdMutex, OnceLock};
 
 use base64::Engine;
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -16,7 +22,7 @@ use crate::crypto::secret_protector::{SecretProtector, ENCRYPTED_PREFIX};
 use crate::enums::app_directory::AppDirectory;
 use crate::enums::vault_policy::VaultPolicy;
 use crate::enums::vault_resource::VaultResource;
-use crate::enums::{ErrorCode, Protocol};
+use crate::enums::{ErrorCode, Platform, Protocol};
 use crate::error::AppError;
 use crate::models::{
     AppSettings, RemoteHost, VaultSyncSettings, VaultSyncStatus, VaultWebDavCredentials,
@@ -29,7 +35,7 @@ static PENDING_AUTO_SYNC: OnceLock<StdMutex<Option<tauri::async_runtime::JoinHan
     OnceLock::new();
 
 /// 保险库中加密保存的跨设备设置载荷。
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PortableVaultPayload {
     schema_version: u32,
@@ -38,8 +44,79 @@ struct PortableVaultPayload {
     background_image: Option<PortableBackgroundImage>,
 }
 
+/// 云端保险库载荷：主机跨平台共享，其余设置按原生平台隔离。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudVaultPayload {
+    schema_version: u32,
+    #[serde(default)]
+    hosts: Vec<RemoteHost>,
+    #[serde(default)]
+    platforms: Vec<CloudPlatformPayload>,
+}
+
+/// 单个平台拥有的应用设置与背景图片。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudPlatformPayload {
+    platform: Platform,
+    settings: AppSettings,
+    #[serde(default)]
+    host_settings: Vec<CloudPlatformHostSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    background_asset: Option<CloudBackgroundAsset>,
+    /// schema v2 兼容字段；下一次同步会迁移到独立压缩资源。
+    #[serde(default)]
+    background_image: Option<PortableBackgroundImage>,
+}
+
+/// 云端平台背景压缩包的非敏感索引信息。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudBackgroundAsset {
+    file_name: String,
+    remote_file: String,
+    sha256: String,
+    uncompressed_size: u64,
+}
+
+/// 一次同步中可能需要上传的背景资源原始字节。
+struct PreparedBackgroundAsset {
+    metadata: CloudBackgroundAsset,
+    bytes: Vec<u8>,
+}
+
+/// 生成的云端配置以及与其引用相匹配的平台资源。
+struct PreparedCloudPayload {
+    payload: CloudVaultPayload,
+    background_assets: Vec<PreparedBackgroundAsset>,
+}
+
+/// 主机中只属于本地平台的覆盖项。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudPlatformHostSettings {
+    host_id: Uuid,
+    #[serde(default)]
+    download_path: Option<String>,
+}
+
+/// 用于增量同步比较的当前平台视图；其他平台条目不参与指纹。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudComparisonScope<'a> {
+    hosts: &'a [RemoteHost],
+    platform: Option<&'a CloudPlatformPayload>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VaultPayloadHeader {
+    schema_version: u32,
+}
+
 /// 随保险库加密保存的本地背景图片。
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PortableBackgroundImage {
     file_name: String,
@@ -59,14 +136,14 @@ impl Drop for EncryptedTempFile {
 pub fn status() -> Result<VaultSyncStatus, AppError> {
     let settings = SettingsService::load()?;
     let sync = settings.vault_sync;
+    let password_saved = locally_protected_secret_is_readable(&sync.password)?;
+    let backup_password_saved = locally_protected_secret_is_readable(&sync.backup_password)?;
     Ok(VaultSyncStatus {
-        configured: !sync.webdav_url.is_empty()
-            && !sync.username.is_empty()
-            && !sync.password.is_empty(),
+        configured: !sync.webdav_url.is_empty() && !sync.username.is_empty() && password_saved,
         enabled: sync.enabled,
         vault_initialized: !sync.vault_id.is_empty() && sync.key_envelope.is_some(),
-        password_saved: !sync.password.is_empty(),
-        backup_password_saved: !sync.backup_password.is_empty(),
+        password_saved,
+        backup_password_saved,
         webdav_url: sync.webdav_url,
         username: sync.username,
         remote_path: cloud_file_path(),
@@ -77,7 +154,18 @@ pub fn status() -> Result<VaultSyncStatus, AppError> {
     })
 }
 
-/// 在配置连续变化停止后自动上传一次；后来的调用会替换尚未执行的任务。
+fn locally_protected_secret_is_readable(value: &str) -> Result<bool, AppError> {
+    if value.is_empty() {
+        return Ok(false);
+    }
+    if !value.starts_with(ENCRYPTED_PREFIX) {
+        return Ok(true);
+    }
+    let key = key_storage::get_or_create_master_key()?;
+    Ok(SecretProtector::new(key).decrypt(value).is_ok())
+}
+
+/// 在主机连续变化停止后执行一次双向同步；后来的调用会替换尚未执行的任务。
 pub fn schedule_auto_sync() {
     let enabled = SettingsService::load()
         .map(|settings| settings.vault_sync.enabled)
@@ -134,11 +222,16 @@ pub async fn enable(
     }
 
     let settings = SettingsService::load()?;
-    let payload = build_payload(settings)?;
-    let plaintext = serde_json::to_vec(&payload).map_err(invalid_backup_error)?;
+    let prepared = build_cloud_payload_for_platform(settings, None, current_platform())?;
+    let scope_hash = cloud_scope_hash(&prepared.payload, current_platform())?;
+    let hosts_hash = cloud_hosts_hash(&prepared.payload)?;
+    let hosts_snapshot = protect_hosts_snapshot(&prepared.payload.hosts)?;
+    let platform_hash = cloud_platform_hash(&prepared.payload, current_platform())?;
+    let plaintext = serde_json::to_vec(&prepared.payload).map_err(invalid_backup_error)?;
     let vault_id = Uuid::new_v4().to_string();
     let (document, key) =
         PortableVaultDocument::create(&plaintext, &backup_password, vault_id.clone(), 1)?;
+    upload_background_assets(adapter.as_mut(), &prepared.background_assets, &[]).await?;
     upload_document(adapter.as_mut(), &document).await?;
     let _ = adapter.disconnect().await;
 
@@ -154,6 +247,10 @@ pub async fn enable(
         key_envelope: Some(document.key_envelope),
         last_synced_revision: document.revision,
         last_synced_at: Some(document.updated_at),
+        last_synced_scope_hash: scope_hash,
+        last_synced_hosts_hash: hosts_hash,
+        last_synced_hosts_snapshot: hosts_snapshot,
+        last_synced_platform_hash: platform_hash,
     };
     SettingsService::save(&settings)?;
     status()
@@ -218,7 +315,7 @@ pub async fn save_backup_password(
     status()
 }
 
-/// 将当前设置上传为下一个保险库 revision。
+/// 双向比较共享主机与当前平台分区，仅对实际变化上传 revision，并拉取其他设备变更。
 pub async fn sync_now(backup_password: Option<String>) -> Result<VaultSyncStatus, AppError> {
     let _guard = sync_lock().lock().await;
     let settings = SettingsService::load()?;
@@ -234,39 +331,203 @@ pub async fn sync_now(backup_password: Option<String>) -> Result<VaultSyncStatus
         .clone()
         .ok_or_else(|| AppError::new(ErrorCode::InvalidBackup, "本机缺少保险库密钥信封"))?;
     let credentials = credentials_from_settings(&sync)?;
+    let key = resolve_vault_key(backup_password.as_deref(), &sync)?;
     let mut adapter = connect_webdav(&credentials).await?;
     ensure_cloud_directory(adapter.as_mut()).await?;
 
-    if let Some(remote) = download_remote_document(adapter.as_mut()).await? {
-        if remote.vault_id != sync.vault_id || remote.revision > sync.last_synced_revision {
+    let remote_state = if let Some(remote) = download_remote_document(adapter.as_mut()).await? {
+        if remote.vault_id != sync.vault_id {
             let _ = adapter.disconnect().await;
             return Err(AppError::new(
                 ErrorCode::SyncConflict,
-                "云端保险库包含更新版本，请先从云端恢复后再同步",
+                "云端保险库与本机 Vault ID 不一致，请先从云端恢复",
             ));
         }
+        let plaintext = remote.decrypt_with_key(&key)?;
+        let payload = parse_cloud_payload(&plaintext)?;
+        Some((remote, payload))
+    } else {
+        None
+    };
+
+    let remote_checkpoint = remote_state
+        .as_ref()
+        .map(|(document, _)| (document.revision, document.updated_at.clone()));
+    let existing_payload = remote_state.as_ref().map(|(_, payload)| payload.clone());
+    let existing_assets = existing_payload
+        .as_ref()
+        .map(cloud_background_asset_index)
+        .unwrap_or_default();
+    let prepared = build_cloud_payload_for_platform(
+        settings.clone(),
+        existing_payload.clone(),
+        current_platform(),
+    )?;
+    let desired_scope_hash = cloud_scope_hash(&prepared.payload, current_platform())?;
+    let desired_hosts_hash = cloud_hosts_hash(&prepared.payload)?;
+    let desired_platform_hash = cloud_platform_hash(&prepared.payload, current_platform())?;
+
+    let (mut final_payload, pull_hosts, pull_platform, push_hosts, push_platform) =
+        if let Some(remote_payload) = existing_payload {
+            let remote_scope_hash = cloud_scope_hash(&remote_payload, current_platform())?;
+            let remote_hosts_hash = cloud_hosts_hash(&remote_payload)?;
+            let remote_platform_hash = cloud_platform_hash(&remote_payload, current_platform())?;
+            let (_, last_platform_hash) = resolve_last_component_hashes(
+                &sync,
+                &desired_scope_hash,
+                &desired_hosts_hash,
+                &desired_platform_hash,
+                &remote_scope_hash,
+                &remote_hosts_hash,
+                &remote_platform_hash,
+            );
+            let base_hosts = if let Some(snapshot) = resolve_hosts_snapshot(&sync)? {
+                snapshot
+            } else if !sync.last_synced_hosts_hash.is_empty()
+                && desired_hosts_hash == sync.last_synced_hosts_hash
+            {
+                prepared.payload.hosts.clone()
+            } else if !sync.last_synced_hosts_hash.is_empty()
+                && remote_hosts_hash == sync.last_synced_hosts_hash
+            {
+                remote_payload.hosts.clone()
+            } else if desired_hosts_hash == remote_hosts_hash {
+                prepared.payload.hosts.clone()
+            } else {
+                let _ = adapter.disconnect().await;
+                return Err(AppError::new(
+                    ErrorCode::SyncConflict,
+                    "缺少共享主机的同步基线，无法安全合并两端变化",
+                ));
+            };
+            let merged_hosts =
+                merge_hosts_three_way(&base_hosts, &prepared.payload.hosts, &remote_payload.hosts)
+                    .map_err(|conflict| {
+                        let (kind, id) = match conflict {
+                            HostMergeError::ConcurrentEdit(id) => ("编辑", id),
+                            HostMergeError::ConcurrentAdd(id) => ("新增", id),
+                        };
+                        AppError::new(
+                            ErrorCode::SyncConflict,
+                            format!("主机 {id} 在两端发生了不兼容的并发{kind}"),
+                        )
+                    })?;
+            let pull_hosts = merged_hosts != prepared.payload.hosts;
+            let push_hosts = merged_hosts != remote_payload.hosts;
+            let Some((pull_platform, push_platform)) = classify_scope_change(
+                &desired_platform_hash,
+                &remote_platform_hash,
+                &last_platform_hash,
+            ) else {
+                let _ = adapter.disconnect().await;
+                return Err(AppError::new(
+                    ErrorCode::SyncConflict,
+                    "当前平台设置已在本机和云端同时变化，请先确认要保留的版本",
+                ));
+            };
+            let mut final_payload = remote_payload;
+            final_payload.hosts = merged_hosts;
+            if push_platform {
+                replace_platform_payload(&mut final_payload, &prepared.payload, current_platform());
+            }
+            (
+                final_payload,
+                pull_hosts,
+                pull_platform,
+                push_hosts,
+                push_platform,
+            )
+        } else {
+            (prepared.payload.clone(), false, false, true, true)
+        };
+
+    final_payload.schema_version = VaultPolicy::CloudPayloadSchemaVersion.value();
+    let final_scope_hash = cloud_scope_hash(&final_payload, current_platform())?;
+    let final_hosts_hash = cloud_hosts_hash(&final_payload)?;
+    let final_platform_hash = cloud_platform_hash(&final_payload, current_platform())?;
+    let should_upload = push_hosts || push_platform;
+
+    if !should_upload {
+        let Some((remote_revision, remote_updated_at)) = remote_checkpoint else {
+            let _ = adapter.disconnect().await;
+            return Err(AppError::new(
+                ErrorCode::SyncConflict,
+                "云端保险库检查点缺失",
+            ));
+        };
+        let result = if pull_hosts || pull_platform {
+            apply_remote_scope(
+                adapter.as_mut(),
+                &settings,
+                final_payload,
+                pull_platform,
+                remote_revision,
+                remote_updated_at,
+                final_scope_hash,
+                final_hosts_hash,
+                final_platform_hash,
+            )
+            .await
+        } else {
+            save_sync_checkpoint(
+                &sync.vault_id,
+                remote_revision,
+                remote_updated_at,
+                final_scope_hash,
+                final_hosts_hash,
+                final_platform_hash,
+                &final_payload.hosts,
+            )
+        };
+        let _ = adapter.disconnect().await;
+        return result;
     }
 
-    let key = resolve_vault_key(backup_password.as_deref(), &sync)?;
-    let payload = build_payload(settings.clone())?;
-    let plaintext = serde_json::to_vec(&payload).map_err(invalid_backup_error)?;
-    let revision = sync.last_synced_revision.saturating_add(1);
+    let assets_to_upload = if push_platform {
+        prepared.background_assets.as_slice()
+    } else {
+        &[]
+    };
+    upload_background_assets(adapter.as_mut(), assets_to_upload, &existing_assets).await?;
+    let plaintext = serde_json::to_vec(&final_payload).map_err(invalid_backup_error)?;
+    let remote_revision = remote_checkpoint
+        .as_ref()
+        .map(|(revision, _)| *revision)
+        .unwrap_or(0);
+    let revision = sync
+        .last_synced_revision
+        .max(remote_revision)
+        .saturating_add(1);
     let document =
         PortableVaultDocument::encrypt(&plaintext, key, sync.vault_id.clone(), revision, envelope)?;
     upload_document(adapter.as_mut(), &document).await?;
+    cleanup_stale_background_assets(adapter.as_mut(), &existing_assets, &final_payload).await;
+    let result = if pull_hosts || pull_platform {
+        apply_remote_scope(
+            adapter.as_mut(),
+            &settings,
+            final_payload,
+            pull_platform,
+            revision,
+            document.updated_at,
+            final_scope_hash,
+            final_hosts_hash,
+            final_platform_hash,
+        )
+        .await
+    } else {
+        save_sync_checkpoint(
+            &sync.vault_id,
+            revision,
+            document.updated_at,
+            final_scope_hash,
+            final_hosts_hash,
+            final_platform_hash,
+            &final_payload.hosts,
+        )
+    };
     let _ = adapter.disconnect().await;
-
-    let mut latest = SettingsService::load()?;
-    if latest.vault_sync.vault_id != sync.vault_id {
-        return Err(AppError::new(
-            ErrorCode::SyncConflict,
-            "同步期间本机保险库配置已变化",
-        ));
-    }
-    latest.vault_sync.last_synced_revision = revision;
-    latest.vault_sync.last_synced_at = Some(document.updated_at);
-    SettingsService::save(&latest)?;
-    status()
+    result
 }
 
 /// 从 WebDAV 下载保险库并使用备份密码恢复到当前设备。
@@ -289,22 +550,23 @@ pub async fn restore(
                 format!("云端未找到 {}", cloud_file_path()),
             )
         })?;
-    let _ = adapter.disconnect().await;
-
     let (plaintext, key) = document.decrypt_with_password(&backup_password)?;
-    let payload: PortableVaultPayload =
-        serde_json::from_slice(&plaintext).map_err(invalid_backup_error)?;
-    if payload.schema_version != 1 {
-        return Err(AppError::new(
-            ErrorCode::InvalidBackup,
-            format!("不支持的保险库载荷版本: {}", payload.schema_version),
-        ));
+    let payload = parse_cloud_payload(&plaintext)?;
+    let scope_hash = cloud_scope_hash(&payload, current_platform())?;
+    let hosts_hash = cloud_hosts_hash(&payload)?;
+    let hosts_snapshot = protect_hosts_snapshot(&payload.hosts)?;
+    let platform_hash = cloud_platform_hash(&payload, current_platform())?;
+    let (mut restored, background_image, background_asset) =
+        restore_cloud_settings_for_platform(payload, current_platform());
+    if let Some(asset) = background_asset {
+        restore_cloud_background_asset(adapter.as_mut(), &mut restored, &asset, current_platform())
+            .await?;
+    } else {
+        restore_background_image(&mut restored, background_image)?;
     }
-
-    let mut restored = payload.settings;
-    restore_background_image(&mut restored, payload.background_image)?;
+    let _ = adapter.disconnect().await;
     restored.vault_sync = VaultSyncSettings {
-        enabled: true,
+        enabled: false,
         webdav_url: credentials.webdav_url,
         username: credentials.username,
         password: credentials.password,
@@ -313,6 +575,10 @@ pub async fn restore(
         key_envelope: Some(document.key_envelope),
         last_synced_revision: document.revision,
         last_synced_at: Some(document.updated_at),
+        last_synced_scope_hash: scope_hash,
+        last_synced_hosts_hash: hosts_hash,
+        last_synced_hosts_snapshot: hosts_snapshot,
+        last_synced_platform_hash: platform_hash,
     };
     key_storage::store_vault_key(&key)?;
     SettingsService::save(&restored)?;
@@ -329,7 +595,7 @@ pub async fn pause() -> Result<VaultSyncStatus, AppError> {
     status()
 }
 
-/// 恢复已初始化保险库的自动同步，并立即上传当前配置。
+/// 恢复已初始化保险库的自动同步，并立即双向核对当前配置。
 pub async fn resume() -> Result<VaultSyncStatus, AppError> {
     let mut settings = SettingsService::load()?;
     if settings.vault_sync.vault_id.is_empty() || settings.vault_sync.key_envelope.is_none() {
@@ -348,7 +614,7 @@ pub fn export_file(file_path: String, backup_password: Option<String>) -> Result
     let mut settings = SettingsService::load()?;
     let backup_password =
         resolve_backup_password(backup_password.as_deref(), &settings.vault_sync)?;
-    let payload = build_payload(settings.clone())?;
+    let payload = build_portable_payload(settings.clone())?;
     let plaintext = serde_json::to_vec(&payload).map_err(invalid_backup_error)?;
     let (document, _) =
         PortableVaultDocument::create(&plaintext, &backup_password, Uuid::new_v4().to_string(), 1)?;
@@ -398,7 +664,548 @@ fn pause_settings(settings: &mut AppSettings) {
     settings.vault_sync.enabled = false;
 }
 
-fn build_payload(mut settings: AppSettings) -> Result<PortableVaultPayload, AppError> {
+fn build_portable_payload(mut settings: AppSettings) -> Result<PortableVaultPayload, AppError> {
+    decrypt_host_passwords(&mut settings)?;
+    let background_image = capture_background_image(&settings)?;
+    settings.vault_sync = VaultSyncSettings::default();
+    Ok(PortableVaultPayload {
+        schema_version: VaultPolicy::PortablePayloadSchemaVersion.value(),
+        settings,
+        background_image,
+    })
+}
+
+fn build_cloud_payload_for_platform(
+    mut settings: AppSettings,
+    existing: Option<CloudVaultPayload>,
+    platform: Platform,
+) -> Result<PreparedCloudPayload, AppError> {
+    decrypt_host_passwords(&mut settings)?;
+    let current_background = capture_cloud_background_asset(&settings, platform)?;
+    let host_settings = settings
+        .hosts
+        .iter()
+        .map(|host| CloudPlatformHostSettings {
+            host_id: host.id,
+            download_path: host.download_path.clone(),
+        })
+        .collect();
+    for host in &mut settings.hosts {
+        host.download_path = None;
+    }
+    let hosts = std::mem::take(&mut settings.hosts);
+    settings.background_image_path = None;
+    settings.vault_sync = VaultSyncSettings::default();
+
+    let mut payload = existing.unwrap_or(CloudVaultPayload {
+        schema_version: VaultPolicy::CloudPayloadSchemaVersion.value(),
+        hosts: Vec::new(),
+        platforms: Vec::new(),
+    });
+    let mut background_assets = migrate_legacy_cloud_backgrounds(&mut payload, platform)?;
+    payload.schema_version = VaultPolicy::CloudPayloadSchemaVersion.value();
+    payload.hosts = hosts;
+    payload.platforms.retain(|entry| entry.platform != platform);
+    let background_asset = current_background
+        .as_ref()
+        .map(|prepared| prepared.metadata.clone());
+    if let Some(prepared) = current_background {
+        background_assets.push(prepared);
+    }
+    payload.platforms.push(CloudPlatformPayload {
+        platform,
+        settings,
+        host_settings,
+        background_asset,
+        background_image: None,
+    });
+    Ok(PreparedCloudPayload {
+        payload,
+        background_assets,
+    })
+}
+
+fn restore_cloud_settings_for_platform(
+    payload: CloudVaultPayload,
+    platform: Platform,
+) -> (
+    AppSettings,
+    Option<PortableBackgroundImage>,
+    Option<CloudBackgroundAsset>,
+) {
+    let platform_payload = payload
+        .platforms
+        .into_iter()
+        .find(|entry| entry.platform == platform);
+    let (mut settings, host_settings, background_image, background_asset) = match platform_payload {
+        Some(entry) => (
+            entry.settings,
+            entry.host_settings,
+            entry.background_image,
+            entry.background_asset,
+        ),
+        None => (AppSettings::default(), Vec::new(), None, None),
+    };
+    settings.hosts = payload
+        .hosts
+        .into_iter()
+        .map(|mut host| {
+            host.download_path = host_settings
+                .iter()
+                .find(|entry| entry.host_id == host.id)
+                .and_then(|entry| entry.download_path.clone());
+            host
+        })
+        .collect();
+    settings.vault_sync = VaultSyncSettings::default();
+    (settings, background_image, background_asset)
+}
+
+fn parse_cloud_payload(plaintext: &[u8]) -> Result<CloudVaultPayload, AppError> {
+    let header: VaultPayloadHeader =
+        serde_json::from_slice(plaintext).map_err(invalid_backup_error)?;
+    if header.schema_version == VaultPolicy::CloudPayloadSchemaVersion.value()
+        || header.schema_version == VaultPolicy::LegacyCloudPayloadSchemaVersion.value()
+    {
+        let mut payload: CloudVaultPayload =
+            serde_json::from_slice(plaintext).map_err(invalid_backup_error)?;
+        payload.schema_version = VaultPolicy::CloudPayloadSchemaVersion.value();
+        return Ok(payload);
+    }
+    if header.schema_version == VaultPolicy::PortablePayloadSchemaVersion.value() {
+        let legacy: PortableVaultPayload =
+            serde_json::from_slice(plaintext).map_err(invalid_backup_error)?;
+        let hosts = legacy
+            .settings
+            .hosts
+            .into_iter()
+            .map(|mut host| {
+                host.download_path = None;
+                host
+            })
+            .collect();
+        return Ok(CloudVaultPayload {
+            schema_version: VaultPolicy::CloudPayloadSchemaVersion.value(),
+            hosts,
+            platforms: Vec::new(),
+        });
+    }
+    Err(AppError::new(
+        ErrorCode::InvalidBackup,
+        format!("不支持的保险库载荷版本: {}", header.schema_version),
+    ))
+}
+
+fn capture_cloud_background_asset(
+    settings: &AppSettings,
+    platform: Platform,
+) -> Result<Option<PreparedBackgroundAsset>, AppError> {
+    let Some(raw_path) = settings.background_image_path.as_deref() else {
+        return Ok(None);
+    };
+    if raw_path.starts_with("data:")
+        || raw_path.starts_with("http://")
+        || raw_path.starts_with("https://")
+    {
+        return Ok(None);
+    }
+    let path = Path::new(raw_path);
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| AppError::new(ErrorCode::StorageReadFailed, "背景图片路径缺少有效文件名"))?;
+    let bytes = std::fs::read(path).map_err(|error| {
+        AppError::new(
+            ErrorCode::StorageReadFailed,
+            format!("无法读取要同步的背景图片 {}: {error}", path.display()),
+        )
+    })?;
+    prepare_background_asset(platform, file_name.to_string(), bytes).map(Some)
+}
+
+fn prepare_background_asset(
+    platform: Platform,
+    file_name: String,
+    bytes: Vec<u8>,
+) -> Result<PreparedBackgroundAsset, AppError> {
+    if bytes.len() > VaultPolicy::MaximumBackgroundBytes.value() as usize {
+        return Err(AppError::new(
+            ErrorCode::StorageReadFailed,
+            "背景图片超过 20 MiB 安全限制",
+        ));
+    }
+    let safe_name = Path::new(&file_name)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| AppError::new(ErrorCode::InvalidBackup, "背景图片名称无效"))?;
+    let digest = Sha256::digest(&bytes);
+    let sha256: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    Ok(PreparedBackgroundAsset {
+        metadata: CloudBackgroundAsset {
+            file_name: safe_name.to_string(),
+            remote_file: background_asset_file_name(platform, &sha256),
+            sha256,
+            uncompressed_size: bytes.len() as u64,
+        },
+        bytes,
+    })
+}
+
+fn migrate_legacy_cloud_backgrounds(
+    payload: &mut CloudVaultPayload,
+    current_platform: Platform,
+) -> Result<Vec<PreparedBackgroundAsset>, AppError> {
+    let mut prepared = Vec::new();
+    for entry in &mut payload.platforms {
+        if entry.platform == current_platform {
+            continue;
+        }
+        let Some(legacy) = entry.background_image.take() else {
+            continue;
+        };
+        if entry.background_asset.is_some() {
+            continue;
+        }
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(legacy.data_base64)
+            .map_err(invalid_backup_error)?;
+        let asset = prepare_background_asset(entry.platform, legacy.file_name, bytes)?;
+        entry.background_asset = Some(asset.metadata.clone());
+        entry.settings.background_image_path = None;
+        prepared.push(asset);
+    }
+    Ok(prepared)
+}
+
+fn cloud_background_asset_index(payload: &CloudVaultPayload) -> Vec<CloudBackgroundAsset> {
+    payload
+        .platforms
+        .iter()
+        .filter_map(|entry| entry.background_asset.clone())
+        .collect()
+}
+
+fn background_asset_file_name(platform: Platform, sha256: &str) -> String {
+    format!(
+        "{}{}{}",
+        background_asset_prefix(platform),
+        sha256,
+        VaultResource::BackgroundArchiveExtension.as_str()
+    )
+}
+
+const fn background_asset_prefix(platform: Platform) -> &'static str {
+    match platform {
+        Platform::Windows => VaultResource::BackgroundWindowsPrefix.as_str(),
+        Platform::Macos => VaultResource::BackgroundMacosPrefix.as_str(),
+        Platform::Linux => VaultResource::BackgroundLinuxPrefix.as_str(),
+        Platform::Ios => VaultResource::BackgroundIosPrefix.as_str(),
+        Platform::Android => VaultResource::BackgroundAndroidPrefix.as_str(),
+    }
+}
+
+fn cloud_scope_hash(payload: &CloudVaultPayload, platform: Platform) -> Result<String, AppError> {
+    let scope = CloudComparisonScope {
+        hosts: &payload.hosts,
+        platform: payload
+            .platforms
+            .iter()
+            .find(|entry| entry.platform == platform),
+    };
+    let serialized = serde_json::to_vec(&scope).map_err(invalid_backup_error)?;
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(serialized)))
+}
+
+fn cloud_hosts_hash(payload: &CloudVaultPayload) -> Result<String, AppError> {
+    cloud_hosts_slice_hash(&payload.hosts)
+}
+
+fn cloud_hosts_slice_hash(hosts: &[RemoteHost]) -> Result<String, AppError> {
+    let serialized = serde_json::to_vec(hosts).map_err(invalid_backup_error)?;
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(serialized)))
+}
+
+fn canonical_cloud_hosts(settings: &AppSettings) -> Result<Vec<RemoteHost>, AppError> {
+    let key = key_storage::get_or_create_master_key()?;
+    let protector = SecretProtector::new(key);
+    settings
+        .hosts
+        .iter()
+        .cloned()
+        .map(|mut host| {
+            if host.password.starts_with(ENCRYPTED_PREFIX) {
+                host.password = protector.decrypt(&host.password)?;
+            }
+            host.download_path = None;
+            host.is_connected = false;
+            Ok(host)
+        })
+        .collect()
+}
+
+fn protect_hosts_snapshot(hosts: &[RemoteHost]) -> Result<String, AppError> {
+    let serialized = serde_json::to_string(hosts).map_err(invalid_backup_error)?;
+    let key = key_storage::get_or_create_master_key()?;
+    SecretProtector::new(key).encrypt(&serialized)
+}
+
+fn resolve_hosts_snapshot(sync: &VaultSyncSettings) -> Result<Option<Vec<RemoteHost>>, AppError> {
+    if sync.last_synced_hosts_snapshot.is_empty() {
+        return Ok(None);
+    }
+    let key = key_storage::get_or_create_master_key()?;
+    let serialized = SecretProtector::new(key).decrypt(&sync.last_synced_hosts_snapshot)?;
+    serde_json::from_str(&serialized)
+        .map(Some)
+        .map_err(invalid_backup_error)
+}
+
+/// 在主机写入前迁移旧版哈希检查点，避免升级后的第一次离线修改丢失三方合并基线。
+pub fn capture_host_sync_baseline(settings: &mut AppSettings) -> Result<(), AppError> {
+    if !settings.vault_sync.enabled
+        || !settings.vault_sync.last_synced_hosts_snapshot.is_empty()
+        || settings.vault_sync.last_synced_hosts_hash.is_empty()
+    {
+        return Ok(());
+    }
+    let hosts = canonical_cloud_hosts(settings)?;
+    if cloud_hosts_slice_hash(&hosts)? == settings.vault_sync.last_synced_hosts_hash {
+        settings.vault_sync.last_synced_hosts_snapshot = protect_hosts_snapshot(&hosts)?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HostMergeError {
+    ConcurrentEdit(Uuid),
+    ConcurrentAdd(Uuid),
+}
+
+fn merge_host_record(
+    id: Uuid,
+    base: Option<&RemoteHost>,
+    local: Option<&RemoteHost>,
+    remote: Option<&RemoteHost>,
+) -> Result<Option<RemoteHost>, HostMergeError> {
+    match (base, local, remote) {
+        (None, None, None) | (Some(_), None, None) => Ok(None),
+        (None, Some(host), None) | (None, None, Some(host)) => Ok(Some(host.clone())),
+        (None, Some(local), Some(remote)) if local == remote => Ok(Some(local.clone())),
+        (None, Some(_), Some(_)) => Err(HostMergeError::ConcurrentAdd(id)),
+        // 删除优先于同一条记录上的并发编辑，防止已删除主机被离线设备复活。
+        (Some(_), None, Some(_)) | (Some(_), Some(_), None) => Ok(None),
+        (Some(_), Some(local), Some(remote)) if local == remote => Ok(Some(local.clone())),
+        (Some(base), Some(local), Some(remote)) if local == base => Ok(Some(remote.clone())),
+        (Some(base), Some(local), Some(remote)) if remote == base => Ok(Some(local.clone())),
+        (Some(_), Some(_), Some(_)) => Err(HostMergeError::ConcurrentEdit(id)),
+    }
+}
+
+fn merge_hosts_three_way(
+    base: &[RemoteHost],
+    local: &[RemoteHost],
+    remote: &[RemoteHost],
+) -> Result<Vec<RemoteHost>, HostMergeError> {
+    let base_by_id: HashMap<Uuid, &RemoteHost> = base.iter().map(|host| (host.id, host)).collect();
+    let local_by_id: HashMap<Uuid, &RemoteHost> =
+        local.iter().map(|host| (host.id, host)).collect();
+    let remote_by_id: HashMap<Uuid, &RemoteHost> =
+        remote.iter().map(|host| (host.id, host)).collect();
+    let ids: HashSet<Uuid> = base_by_id
+        .keys()
+        .chain(local_by_id.keys())
+        .chain(remote_by_id.keys())
+        .copied()
+        .collect();
+    let mut merged_by_id = HashMap::new();
+    for id in ids {
+        if let Some(host) = merge_host_record(
+            id,
+            base_by_id.get(&id).copied(),
+            local_by_id.get(&id).copied(),
+            remote_by_id.get(&id).copied(),
+        )? {
+            merged_by_id.insert(id, host);
+        }
+    }
+
+    let surviving: HashSet<Uuid> = merged_by_id.keys().copied().collect();
+    let filtered_ids = |hosts: &[RemoteHost]| {
+        hosts
+            .iter()
+            .map(|host| host.id)
+            .filter(|id| surviving.contains(id))
+            .collect::<Vec<_>>()
+    };
+    let base_order = filtered_ids(base);
+    let local_order = filtered_ids(local);
+    let remote_order = filtered_ids(remote);
+    let mut order = if local_order == remote_order {
+        local_order
+    } else if local_order == base_order {
+        remote_order
+    } else if remote_order == base_order {
+        local_order
+    } else {
+        let mut combined = remote_order;
+        for id in local_order {
+            if !combined.contains(&id) {
+                combined.push(id);
+            }
+        }
+        combined
+    };
+    for id in surviving {
+        if !order.contains(&id) {
+            order.push(id);
+        }
+    }
+    Ok(order
+        .into_iter()
+        .filter_map(|id| merged_by_id.remove(&id))
+        .collect())
+}
+
+fn cloud_platform_hash(
+    payload: &CloudVaultPayload,
+    platform: Platform,
+) -> Result<String, AppError> {
+    let platform_payload = payload
+        .platforms
+        .iter()
+        .find(|entry| entry.platform == platform);
+    let serialized = serde_json::to_vec(&platform_payload).map_err(invalid_backup_error)?;
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(serialized)))
+}
+
+fn resolve_last_component_hashes(
+    sync: &VaultSyncSettings,
+    desired_scope_hash: &str,
+    desired_hosts_hash: &str,
+    desired_platform_hash: &str,
+    remote_scope_hash: &str,
+    remote_hosts_hash: &str,
+    remote_platform_hash: &str,
+) -> (String, String) {
+    if !sync.last_synced_hosts_hash.is_empty() && !sync.last_synced_platform_hash.is_empty() {
+        return (
+            sync.last_synced_hosts_hash.clone(),
+            sync.last_synced_platform_hash.clone(),
+        );
+    }
+    if sync.last_synced_scope_hash == desired_scope_hash {
+        return (
+            desired_hosts_hash.to_string(),
+            desired_platform_hash.to_string(),
+        );
+    }
+    if sync.last_synced_scope_hash == remote_scope_hash {
+        return (
+            remote_hosts_hash.to_string(),
+            remote_platform_hash.to_string(),
+        );
+    }
+    (String::new(), String::new())
+}
+
+/// 返回 `(pull_remote, push_local)`；`None` 表示两端对同一作用域并发修改。
+fn classify_scope_change(
+    local_hash: &str,
+    remote_hash: &str,
+    last_hash: &str,
+) -> Option<(bool, bool)> {
+    if local_hash == remote_hash {
+        return Some((false, false));
+    }
+    if !last_hash.is_empty() && local_hash == last_hash {
+        return Some((true, false));
+    }
+    if !last_hash.is_empty() && remote_hash == last_hash {
+        return Some((false, true));
+    }
+    None
+}
+
+fn replace_platform_payload(
+    target: &mut CloudVaultPayload,
+    source: &CloudVaultPayload,
+    platform: Platform,
+) {
+    target.platforms.retain(|entry| entry.platform != platform);
+    if let Some(entry) = source
+        .platforms
+        .iter()
+        .find(|entry| entry.platform == platform)
+    {
+        target.platforms.push(entry.clone());
+    }
+}
+
+fn save_sync_checkpoint(
+    vault_id: &str,
+    revision: u64,
+    updated_at: String,
+    scope_hash: String,
+    hosts_hash: String,
+    platform_hash: String,
+    hosts: &[RemoteHost],
+) -> Result<VaultSyncStatus, AppError> {
+    let mut latest = SettingsService::load()?;
+    if latest.vault_sync.vault_id != vault_id {
+        return Err(AppError::new(
+            ErrorCode::SyncConflict,
+            "同步期间本机保险库配置已变化",
+        ));
+    }
+    latest.vault_sync.last_synced_revision = revision;
+    latest.vault_sync.last_synced_at = Some(updated_at);
+    latest.vault_sync.last_synced_scope_hash = scope_hash;
+    latest.vault_sync.last_synced_hosts_hash = hosts_hash;
+    latest.vault_sync.last_synced_hosts_snapshot = protect_hosts_snapshot(hosts)?;
+    latest.vault_sync.last_synced_platform_hash = platform_hash;
+    SettingsService::save(&latest)?;
+    status()
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn apply_remote_scope(
+    adapter: &mut dyn FileTransport,
+    local: &AppSettings,
+    payload: CloudVaultPayload,
+    pull_platform: bool,
+    revision: u64,
+    updated_at: String,
+    scope_hash: String,
+    hosts_hash: String,
+    platform_hash: String,
+) -> Result<VaultSyncStatus, AppError> {
+    let hosts_snapshot = protect_hosts_snapshot(&payload.hosts)?;
+    let (mut merged, background_image, background_asset) =
+        restore_cloud_settings_for_platform(payload, current_platform());
+    if pull_platform {
+        if let Some(asset) = background_asset {
+            restore_cloud_background_asset(adapter, &mut merged, &asset, current_platform())
+                .await?;
+        } else {
+            restore_background_image(&mut merged, background_image)?;
+        }
+    } else {
+        merged.background_image_path = local.background_image_path.clone();
+    }
+    merged.vault_sync = local.vault_sync.clone();
+    merged.vault_sync.last_synced_revision = revision;
+    merged.vault_sync.last_synced_at = Some(updated_at);
+    merged.vault_sync.last_synced_scope_hash = scope_hash;
+    merged.vault_sync.last_synced_hosts_hash = hosts_hash;
+    merged.vault_sync.last_synced_hosts_snapshot = hosts_snapshot;
+    merged.vault_sync.last_synced_platform_hash = platform_hash;
+    SettingsService::save(&merged)?;
+    status()
+}
+
+fn decrypt_host_passwords(settings: &mut AppSettings) -> Result<(), AppError> {
     let key = key_storage::get_or_create_master_key()?;
     let protector = SecretProtector::new(key);
     for host in &mut settings.hosts {
@@ -406,13 +1213,21 @@ fn build_payload(mut settings: AppSettings) -> Result<PortableVaultPayload, AppE
             host.password = protector.decrypt(&host.password)?;
         }
     }
-    let background_image = capture_background_image(&settings)?;
-    settings.vault_sync = VaultSyncSettings::default();
-    Ok(PortableVaultPayload {
-        schema_version: 1,
-        settings,
-        background_image,
-    })
+    Ok(())
+}
+
+const fn current_platform() -> Platform {
+    if cfg!(target_os = "windows") {
+        Platform::Windows
+    } else if cfg!(target_os = "macos") {
+        Platform::Macos
+    } else if cfg!(target_os = "linux") {
+        Platform::Linux
+    } else if cfg!(target_os = "ios") {
+        Platform::Ios
+    } else {
+        Platform::Android
+    }
 }
 
 fn capture_background_image(
@@ -612,6 +1427,180 @@ async fn remote_vault_exists(adapter: &mut dyn FileTransport) -> Result<bool, Ap
         .any(|entry| !entry.is_directory && entry.name == VaultResource::CloudFile.as_str()))
 }
 
+async fn upload_background_assets(
+    adapter: &mut dyn FileTransport,
+    prepared: &[PreparedBackgroundAsset],
+    existing: &[CloudBackgroundAsset],
+) -> Result<(), AppError> {
+    if prepared.is_empty() {
+        return Ok(());
+    }
+    let entries = adapter
+        .list_directory(&format!("/{}", VaultResource::CloudDirectory.as_str()))
+        .await?;
+    for asset in prepared {
+        let remote_exists = entries
+            .iter()
+            .any(|entry| !entry.is_directory && entry.name == asset.metadata.remote_file);
+        if !background_asset_needs_upload(&asset.metadata, existing, remote_exists) {
+            continue;
+        }
+
+        let temp = background_temp_path()?;
+        let _cleanup = EncryptedTempFile(temp.clone());
+        let file = std::fs::File::create(&temp)
+            .map_err(|error| AppError::new(ErrorCode::StorageWriteFailed, error.to_string()))?;
+        let mut encoder = GzEncoder::new(file, Compression::best());
+        encoder
+            .write_all(&asset.bytes)
+            .map_err(|error| AppError::new(ErrorCode::StorageWriteFailed, error.to_string()))?;
+        encoder
+            .finish()
+            .map_err(|error| AppError::new(ErrorCode::StorageWriteFailed, error.to_string()))?;
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+        let drain = tokio::spawn(async move { while rx.recv().await.is_some() {} });
+        let result = adapter
+            .upload_file(
+                &temp.to_string_lossy(),
+                &cloud_resource_path(&asset.metadata.remote_file),
+                tx,
+            )
+            .await;
+        let _ = drain.await;
+        result?;
+    }
+    Ok(())
+}
+
+fn background_asset_needs_upload(
+    local: &CloudBackgroundAsset,
+    existing: &[CloudBackgroundAsset],
+    remote_exists: bool,
+) -> bool {
+    if !remote_exists {
+        return true;
+    }
+    !existing.iter().any(|remote| {
+        remote.remote_file == local.remote_file
+            && remote.sha256 == local.sha256
+            && remote.uncompressed_size == local.uncompressed_size
+    })
+}
+
+async fn cleanup_stale_background_assets(
+    adapter: &mut dyn FileTransport,
+    existing: &[CloudBackgroundAsset],
+    payload: &CloudVaultPayload,
+) {
+    let referenced: Vec<&str> = payload
+        .platforms
+        .iter()
+        .filter_map(|entry| entry.background_asset.as_ref())
+        .map(|asset| asset.remote_file.as_str())
+        .collect();
+    for stale in existing {
+        if referenced.contains(&stale.remote_file.as_str())
+            || !is_managed_background_asset_name(&stale.remote_file)
+        {
+            continue;
+        }
+        let _ = adapter
+            .delete_file(&cloud_resource_path(&stale.remote_file))
+            .await;
+    }
+}
+
+fn is_managed_background_asset_name(file_name: &str) -> bool {
+    let extension = VaultResource::BackgroundArchiveExtension.as_str();
+    let Some(without_extension) = file_name.strip_suffix(extension) else {
+        return false;
+    };
+    let prefixes = [
+        VaultResource::BackgroundWindowsPrefix.as_str(),
+        VaultResource::BackgroundMacosPrefix.as_str(),
+        VaultResource::BackgroundLinuxPrefix.as_str(),
+        VaultResource::BackgroundIosPrefix.as_str(),
+        VaultResource::BackgroundAndroidPrefix.as_str(),
+    ];
+    prefixes.iter().any(|prefix| {
+        without_extension
+            .strip_prefix(prefix)
+            .is_some_and(|digest| {
+                digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+    })
+}
+
+async fn restore_cloud_background_asset(
+    adapter: &mut dyn FileTransport,
+    settings: &mut AppSettings,
+    asset: &CloudBackgroundAsset,
+    platform: Platform,
+) -> Result<(), AppError> {
+    if asset.remote_file != background_asset_file_name(platform, &asset.sha256)
+        || asset.uncompressed_size > u64::from(VaultPolicy::MaximumBackgroundBytes.value())
+    {
+        return Err(AppError::new(
+            ErrorCode::InvalidBackup,
+            "云端背景资源索引无效",
+        ));
+    }
+    let temp = background_temp_path()?;
+    let _cleanup = EncryptedTempFile(temp.clone());
+    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+    let drain = tokio::spawn(async move { while rx.recv().await.is_some() {} });
+    let result = adapter
+        .download_file(
+            &cloud_resource_path(&asset.remote_file),
+            &temp.to_string_lossy(),
+            tx,
+        )
+        .await;
+    let _ = drain.await;
+    result?;
+
+    let file = std::fs::File::open(&temp)
+        .map_err(|error| AppError::new(ErrorCode::StorageReadFailed, error.to_string()))?;
+    let limit = u64::from(VaultPolicy::MaximumBackgroundBytes.value()) + 1;
+    let mut decoder = GzDecoder::new(file).take(limit);
+    let mut bytes = Vec::new();
+    decoder
+        .read_to_end(&mut bytes)
+        .map_err(|error| AppError::new(ErrorCode::InvalidBackup, error.to_string()))?;
+    if bytes.len() > VaultPolicy::MaximumBackgroundBytes.value() as usize
+        || bytes.len() as u64 != asset.uncompressed_size
+    {
+        return Err(AppError::new(
+            ErrorCode::InvalidBackup,
+            "云端背景资源解压后大小不一致",
+        ));
+    }
+    let digest = Sha256::digest(&bytes);
+    let sha256: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    if sha256 != asset.sha256 {
+        return Err(AppError::new(
+            ErrorCode::InvalidBackup,
+            "云端背景资源摘要校验失败",
+        ));
+    }
+
+    let safe_name = Path::new(&asset.file_name)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| AppError::new(ErrorCode::InvalidBackup, "云端背景图片名称无效"))?;
+    let directory =
+        SettingsService::default_data_dir()?.join(AppDirectory::VaultBackgroundRoot.as_str());
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| AppError::new(ErrorCode::StorageWriteFailed, error.to_string()))?;
+    let path = directory.join(safe_name);
+    crate::local_fs::atomic_write(&path, &bytes)
+        .map_err(|error| AppError::new(ErrorCode::StorageWriteFailed, error.to_string()))?;
+    settings.background_image_path = Some(path.to_string_lossy().into_owned());
+    Ok(())
+}
+
 async fn download_remote_document(
     adapter: &mut dyn FileTransport,
 ) -> Result<Option<PortableVaultDocument>, AppError> {
@@ -673,12 +1662,21 @@ fn encrypted_temp_path() -> Result<PathBuf, AppError> {
     Ok(directory.join(format!("{}.sytfm", Uuid::new_v4())))
 }
 
+fn background_temp_path() -> Result<PathBuf, AppError> {
+    let directory = std::env::temp_dir()
+        .join(VaultResource::CloudDirectory.as_str())
+        .join(VaultResource::TemporaryDirectory.as_str());
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| AppError::new(ErrorCode::StorageWriteFailed, error.to_string()))?;
+    Ok(directory.join(Uuid::new_v4().to_string()))
+}
+
+fn cloud_resource_path(file_name: &str) -> String {
+    format!("/{}/{}", VaultResource::CloudDirectory.as_str(), file_name)
+}
+
 fn cloud_file_path() -> String {
-    format!(
-        "/{}/{}",
-        VaultResource::CloudDirectory.as_str(),
-        VaultResource::CloudFile.as_str()
-    )
+    cloud_resource_path(VaultResource::CloudFile.as_str())
 }
 
 fn invalid_backup_error(error: impl std::fmt::Display) -> AppError {
@@ -713,7 +1711,7 @@ mod tests {
             is_connected: false,
         });
 
-        let payload = build_payload(settings).expect("build payload");
+        let payload = build_portable_payload(settings).expect("build payload");
         assert_eq!(payload.settings.hosts[0].password, "plain-secret");
         assert_eq!(
             payload.settings.default_download_path.as_deref(),
@@ -777,6 +1775,83 @@ mod tests {
     }
 
     #[test]
+    fn cloud_background_is_referenced_by_digest_instead_of_base64() {
+        let path =
+            std::env::temp_dir().join(format!("sy-tfm-cloud-background-{}.jpg", Uuid::new_v4()));
+        let expected = b"background-bytes-that-must-not-enter-cloud-json".to_vec();
+        std::fs::write(&path, &expected).expect("write background fixture");
+        let settings = AppSettings {
+            background_image_path: Some(path.to_string_lossy().into_owned()),
+            ..AppSettings::default()
+        };
+
+        let prepared = build_cloud_payload_for_platform(settings, None, Platform::Android)
+            .expect("build cloud payload");
+        let platform = prepared
+            .payload
+            .platforms
+            .iter()
+            .find(|entry| entry.platform == Platform::Android)
+            .expect("Android platform payload");
+        let asset = platform
+            .background_asset
+            .as_ref()
+            .expect("background asset");
+        let serialized = serde_json::to_vec(&prepared.payload).expect("serialize cloud payload");
+        let _ = std::fs::remove_file(path);
+
+        assert!(platform.settings.background_image_path.is_none());
+        assert!(platform.background_image.is_none());
+        assert!(asset
+            .remote_file
+            .starts_with(VaultResource::BackgroundAndroidPrefix.as_str()));
+        assert!(asset
+            .remote_file
+            .ends_with(VaultResource::BackgroundArchiveExtension.as_str()));
+        assert_eq!(asset.uncompressed_size, expected.len() as u64);
+        assert_eq!(prepared.background_assets.len(), 1);
+        assert_eq!(prepared.background_assets[0].bytes, expected);
+        assert!(!serialized
+            .windows(expected.len())
+            .any(|window| window == expected.as_slice()));
+    }
+
+    #[test]
+    fn unchanged_existing_background_asset_is_not_uploaded_again() {
+        let local = CloudBackgroundAsset {
+            file_name: "wallpaper.jpg".to_string(),
+            remote_file: background_asset_file_name(Platform::Android, "same-digest"),
+            sha256: "same-digest".to_string(),
+            uncompressed_size: 4096,
+        };
+
+        assert!(!background_asset_needs_upload(
+            &local,
+            std::slice::from_ref(&local),
+            true,
+        ));
+        assert!(background_asset_needs_upload(
+            &local,
+            std::slice::from_ref(&local),
+            false,
+        ));
+    }
+
+    #[test]
+    fn managed_background_names_are_content_addressed_and_path_safe() {
+        let digest = "a".repeat(64);
+        let valid = background_asset_file_name(Platform::Android, &digest);
+
+        assert!(is_managed_background_asset_name(&valid));
+        assert!(!is_managed_background_asset_name(
+            "../background-android-unsafe.gz"
+        ));
+        assert!(!is_managed_background_asset_name(
+            "background-android-short.gz"
+        ));
+    }
+
+    #[test]
     fn pausing_preserves_saved_credentials_passwords_and_vault_metadata() {
         let mut settings = AppSettings {
             vault_sync: VaultSyncSettings {
@@ -789,6 +1864,10 @@ mod tests {
                 key_envelope: None,
                 last_synced_revision: 7,
                 last_synced_at: Some("2026-07-19T00:00:00Z".to_string()),
+                last_synced_scope_hash: "scope-hash".to_string(),
+                last_synced_hosts_hash: "hosts-hash".to_string(),
+                last_synced_hosts_snapshot: "encrypted-snapshot".to_string(),
+                last_synced_platform_hash: "platform-hash".to_string(),
             },
             ..AppSettings::default()
         };
@@ -804,5 +1883,340 @@ mod tests {
         assert_eq!(settings.vault_sync.backup_password, "encrypted-backup");
         assert_eq!(settings.vault_sync.vault_id, "vault-id");
         assert_eq!(settings.vault_sync.last_synced_revision, 7);
+        assert_eq!(settings.vault_sync.last_synced_scope_hash, "scope-hash");
+        assert_eq!(settings.vault_sync.last_synced_hosts_hash, "hosts-hash");
+        assert_eq!(
+            settings.vault_sync.last_synced_hosts_snapshot,
+            "encrypted-snapshot"
+        );
+        assert_eq!(
+            settings.vault_sync.last_synced_platform_hash,
+            "platform-hash"
+        );
+    }
+
+    #[test]
+    fn cloud_payload_keeps_shared_hosts_and_separate_platform_settings() {
+        let mut windows_host = sample_host("windows-host");
+        windows_host.download_path = Some("C:/Windows/Downloads".to_string());
+        let windows_settings = AppSettings {
+            accent_color: "windows-accent".to_string(),
+            hosts: vec![windows_host],
+            ..AppSettings::default()
+        };
+        let windows_prepared =
+            build_cloud_payload_for_platform(windows_settings, None, Platform::Windows)
+                .expect("build Windows payload");
+
+        let mut android_host = sample_host("shared-host");
+        android_host.download_path = Some("/storage/emulated/0/Download/SY-TFM".to_string());
+        let android_settings = AppSettings {
+            accent_color: "android-accent".to_string(),
+            hosts: vec![android_host],
+            ..AppSettings::default()
+        };
+        let merged_prepared = build_cloud_payload_for_platform(
+            android_settings,
+            Some(windows_prepared.payload),
+            Platform::Android,
+        )
+        .expect("merge Android payload");
+        let merged = merged_prepared.payload;
+
+        assert_eq!(merged.hosts.len(), 1);
+        assert_eq!(merged.hosts[0].name, "shared-host");
+        assert!(merged.hosts[0].download_path.is_none());
+        assert_eq!(merged.platforms.len(), 2);
+        assert_eq!(
+            merged
+                .platforms
+                .iter()
+                .find(|entry| entry.platform == Platform::Windows)
+                .expect("Windows settings")
+                .settings
+                .accent_color,
+            "windows-accent"
+        );
+        assert_eq!(
+            merged
+                .platforms
+                .iter()
+                .find(|entry| entry.platform == Platform::Android)
+                .expect("Android settings")
+                .settings
+                .accent_color,
+            "android-accent"
+        );
+        assert!(merged
+            .platforms
+            .iter()
+            .all(|entry| entry.settings.hosts.is_empty()));
+        assert_eq!(
+            merged
+                .platforms
+                .iter()
+                .find(|entry| entry.platform == Platform::Windows)
+                .expect("Windows settings")
+                .host_settings[0]
+                .download_path
+                .as_deref(),
+            Some("C:/Windows/Downloads")
+        );
+        assert_eq!(
+            merged
+                .platforms
+                .iter()
+                .find(|entry| entry.platform == Platform::Android)
+                .expect("Android settings")
+                .host_settings[0]
+                .download_path
+                .as_deref(),
+            Some("/storage/emulated/0/Download/SY-TFM")
+        );
+
+        let (android_restored, _, _) =
+            restore_cloud_settings_for_platform(merged, Platform::Android);
+        assert_eq!(android_restored.accent_color, "android-accent");
+        assert_eq!(
+            android_restored.hosts[0].download_path.as_deref(),
+            Some("/storage/emulated/0/Download/SY-TFM")
+        );
+    }
+
+    #[test]
+    fn restore_without_current_platform_settings_uses_defaults_and_shared_hosts() {
+        let payload = CloudVaultPayload {
+            schema_version: VaultPolicy::CloudPayloadSchemaVersion.value(),
+            hosts: vec![sample_host("shared-host")],
+            platforms: Vec::new(),
+        };
+
+        let (restored, background, asset) =
+            restore_cloud_settings_for_platform(payload, Platform::Android);
+
+        assert_eq!(restored.hosts.len(), 1);
+        assert_eq!(restored.hosts[0].name, "shared-host");
+        assert_eq!(restored.theme, AppSettings::default().theme);
+        assert!(background.is_none());
+        assert!(asset.is_none());
+    }
+
+    #[test]
+    fn legacy_cloud_payload_migrates_only_provably_shared_hosts() {
+        let legacy = PortableVaultPayload {
+            schema_version: VaultPolicy::PortablePayloadSchemaVersion.value(),
+            settings: AppSettings {
+                accent_color: "unidentified-platform-accent".to_string(),
+                hosts: vec![sample_host("legacy-host")],
+                ..AppSettings::default()
+            },
+            background_image: None,
+        };
+        let serialized = serde_json::to_vec(&legacy).expect("serialize legacy payload");
+
+        let migrated = parse_cloud_payload(&serialized).expect("migrate legacy payload");
+
+        assert_eq!(migrated.hosts.len(), 1);
+        assert_eq!(migrated.hosts[0].name, "legacy-host");
+        assert!(migrated.platforms.is_empty());
+        assert_eq!(
+            migrated.schema_version,
+            VaultPolicy::CloudPayloadSchemaVersion.value()
+        );
+    }
+
+    #[test]
+    fn cloud_scope_hash_ignores_other_platform_settings() {
+        let windows_settings = AppSettings {
+            accent_color: "windows-accent".to_string(),
+            hosts: vec![sample_host("shared-host")],
+            ..AppSettings::default()
+        };
+        let mut payload =
+            build_cloud_payload_for_platform(windows_settings, None, Platform::Windows)
+                .expect("build Windows payload")
+                .payload;
+        let before = cloud_scope_hash(&payload, Platform::Windows).expect("hash Windows scope");
+
+        payload.platforms.push(CloudPlatformPayload {
+            platform: Platform::Android,
+            settings: AppSettings {
+                accent_color: "android-changed".to_string(),
+                ..AppSettings::default()
+            },
+            host_settings: Vec::new(),
+            background_asset: None,
+            background_image: None,
+        });
+        let after = cloud_scope_hash(&payload, Platform::Windows).expect("hash Windows scope");
+
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn cloud_scope_hash_tracks_shared_hosts_and_current_platform() {
+        let windows_settings = AppSettings {
+            accent_color: "windows-accent".to_string(),
+            hosts: vec![sample_host("shared-host")],
+            ..AppSettings::default()
+        };
+        let mut payload =
+            build_cloud_payload_for_platform(windows_settings, None, Platform::Windows)
+                .expect("build Windows payload")
+                .payload;
+        let baseline = cloud_scope_hash(&payload, Platform::Windows).expect("hash baseline");
+
+        payload.hosts[0].name = "renamed-host".to_string();
+        let host_changed = cloud_scope_hash(&payload, Platform::Windows).expect("hash host change");
+        assert_ne!(baseline, host_changed);
+
+        payload.hosts[0].name = "shared-host".to_string();
+        payload.platforms[0].settings.accent_color = "windows-changed".to_string();
+        let platform_changed =
+            cloud_scope_hash(&payload, Platform::Windows).expect("hash platform change");
+        assert_ne!(baseline, platform_changed);
+    }
+
+    #[test]
+    fn scope_change_direction_pulls_remote_pushes_local_and_rejects_concurrent_edits() {
+        assert_eq!(
+            classify_scope_change("same", "same", "base"),
+            Some((false, false))
+        );
+        assert_eq!(
+            classify_scope_change("base", "remote", "base"),
+            Some((true, false))
+        );
+        assert_eq!(
+            classify_scope_change("local", "base", "base"),
+            Some((false, true))
+        );
+        assert_eq!(classify_scope_change("local", "remote", "base"), None);
+    }
+
+    #[test]
+    fn remote_host_changes_merge_with_local_platform_setting_changes() {
+        let base = build_cloud_payload_for_platform(
+            AppSettings {
+                accent_color: "base-accent".to_string(),
+                hosts: vec![sample_host("base-host")],
+                ..AppSettings::default()
+            },
+            None,
+            Platform::Android,
+        )
+        .expect("build base")
+        .payload;
+        let base_hosts_hash = cloud_hosts_hash(&base).expect("hash base hosts");
+        let base_platform_hash =
+            cloud_platform_hash(&base, Platform::Android).expect("hash base platform");
+
+        let mut remote = base.clone();
+        remote.hosts = vec![sample_host("remote-host")];
+        let local = build_cloud_payload_for_platform(
+            AppSettings {
+                accent_color: "local-accent".to_string(),
+                hosts: base.hosts.clone(),
+                ..AppSettings::default()
+            },
+            Some(base.clone()),
+            Platform::Android,
+        )
+        .expect("build local")
+        .payload;
+
+        assert_eq!(
+            classify_scope_change(
+                &cloud_hosts_hash(&local).expect("hash local hosts"),
+                &cloud_hosts_hash(&remote).expect("hash remote hosts"),
+                &base_hosts_hash,
+            ),
+            Some((true, false))
+        );
+        assert_eq!(
+            classify_scope_change(
+                &cloud_platform_hash(&local, Platform::Android).expect("hash local platform"),
+                &cloud_platform_hash(&remote, Platform::Android).expect("hash remote platform"),
+                &base_platform_hash,
+            ),
+            Some((false, true))
+        );
+
+        replace_platform_payload(&mut remote, &local, Platform::Android);
+        let (merged, _, _) = restore_cloud_settings_for_platform(remote, Platform::Android);
+        assert_eq!(merged.hosts[0].name, "remote-host");
+        assert_eq!(merged.accent_color, "local-accent");
+    }
+
+    fn sample_host(name: &str) -> RemoteHost {
+        RemoteHost {
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+            protocol: Protocol::Sftp,
+            host: "example.com".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            password: "plain-secret".to_string(),
+            tags: String::new(),
+            download_path: None,
+            https: true,
+            base_path: None,
+            sftp_host_key_fingerprint: None,
+            is_connected: false,
+        }
+    }
+
+    #[test]
+    fn host_merge_applies_remote_delete_without_dropping_new_local_host() {
+        let synced = sample_host("synced-a");
+        let local_only = sample_host("local-b");
+        let merged = merge_hosts_three_way(
+            std::slice::from_ref(&synced),
+            &[synced.clone(), local_only.clone()],
+            &[],
+        )
+        .expect("independent delete and add should merge");
+
+        assert_eq!(merged, vec![local_only]);
+    }
+
+    #[test]
+    fn host_merge_unions_independent_additions_from_both_devices() {
+        let local = sample_host("android-host");
+        let remote = sample_host("windows-host");
+        let merged = merge_hosts_three_way(
+            &[],
+            std::slice::from_ref(&local),
+            std::slice::from_ref(&remote),
+        )
+        .expect("different host ids should merge");
+
+        assert_eq!(merged, vec![remote, local]);
+    }
+
+    #[test]
+    fn host_merge_does_not_resurrect_a_deleted_concurrently_edited_host() {
+        let base = sample_host("old-name");
+        let mut remote_edit = base.clone();
+        remote_edit.name = "new-name".to_string();
+
+        let merged = merge_hosts_three_way(std::slice::from_ref(&base), &[], &[remote_edit])
+            .expect("deletion should win over a stale concurrent edit");
+        assert!(merged.is_empty());
+    }
+
+    #[test]
+    fn host_merge_reports_same_host_concurrent_edits() {
+        let base = sample_host("base");
+        let base_id = base.id;
+        let mut local = base.clone();
+        local.host = "local.example.com".to_string();
+        let mut remote = base.clone();
+        remote.host = "remote.example.com".to_string();
+
+        assert_eq!(
+            merge_hosts_three_way(&[base], &[local], &[remote]),
+            Err(HostMergeError::ConcurrentEdit(base_id))
+        );
     }
 }

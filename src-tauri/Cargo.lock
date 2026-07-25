@@ -5069,6 +5069,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "directories",
+ "flate2",
  "fs2",
  "futures-util",
  "keyring",
@@ -5080,6 +5081,9 @@ dependencies = [
  "russh-sftp",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "sy-tfm-android-storage",
+ "sy-tfm-secure-storage",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -5090,6 +5094,26 @@ dependencies = [
  "tracing",
  "ts-rs",
  "uuid",
+]
+
+[[package]]
+name = "sy-tfm-android-storage"
+version = "1.0.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "sy-tfm-secure-storage"
+version = "1.0.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

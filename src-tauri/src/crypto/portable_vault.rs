@@ -1,9 +1,14 @@
 //! 跨设备配置保险库：Argon2id 包装 Vault Key，AES-256-GCM 保护配置载荷。
 
+use std::io::{Read, Write};
+
 use aes_gcm::aead::{Aead, AeadCore, KeyInit, OsRng, Payload};
 use aes_gcm::Aes256Gcm;
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use serde::{Deserialize, Serialize};
 
 use crate::enums::vault_policy::{VaultPolicy, VAULT_KEY_BYTES};
@@ -40,6 +45,9 @@ pub struct PortableVaultDocument {
     pub key_envelope: VaultKeyEnvelope,
     /// Base64 编码的载荷 nonce。
     pub payload_nonce: String,
+    /// 加密前的载荷编码；旧文档缺省时表示未压缩。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_encoding: Option<String>,
     /// Base64 编码的加密配置载荷。
     pub ciphertext: String,
 }
@@ -67,8 +75,9 @@ impl PortableVaultDocument {
         revision: u64,
         key_envelope: VaultKeyEnvelope,
     ) -> Result<Self, AppError> {
+        let compressed = compress_payload(plaintext)?;
         let aad = payload_aad(&vault_id, revision);
-        let (payload_nonce, ciphertext) = encrypt_bytes(&key, plaintext, aad.as_bytes())?;
+        let (payload_nonce, ciphertext) = encrypt_bytes(&key, &compressed, aad.as_bytes())?;
         Ok(Self {
             format: VaultResource::Format.as_str().to_string(),
             vault_id,
@@ -76,6 +85,7 @@ impl PortableVaultDocument {
             updated_at: chrono::Utc::now().to_rfc3339(),
             key_envelope,
             payload_nonce,
+            payload_encoding: Some(VaultResource::PayloadEncodingGzip.as_str().to_string()),
             ciphertext,
         })
     }
@@ -95,7 +105,17 @@ impl PortableVaultDocument {
     pub fn decrypt_with_key(&self, key: &VaultKey) -> Result<Vec<u8>, AppError> {
         self.validate_format()?;
         let aad = payload_aad(&self.vault_id, self.revision);
-        decrypt_bytes(key, &self.payload_nonce, &self.ciphertext, aad.as_bytes())
+        let decrypted = decrypt_bytes(key, &self.payload_nonce, &self.ciphertext, aad.as_bytes())?;
+        match self.payload_encoding.as_deref() {
+            None => Ok(decrypted),
+            Some(encoding) if encoding == VaultResource::PayloadEncodingGzip.as_str() => {
+                decompress_payload(&decrypted)
+            }
+            Some(_) => Err(AppError::new(
+                ErrorCode::InvalidBackup,
+                "保险库使用了不受支持的载荷压缩格式",
+            )),
+        }
     }
 
     fn validate_format(&self) -> Result<(), AppError> {
@@ -107,6 +127,32 @@ impl PortableVaultDocument {
         }
         Ok(())
     }
+}
+
+fn compress_payload(plaintext: &[u8]) -> Result<Vec<u8>, AppError> {
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
+    encoder
+        .write_all(plaintext)
+        .map_err(|error| AppError::new(ErrorCode::CryptoEncryptFailed, error.to_string()))?;
+    encoder
+        .finish()
+        .map_err(|error| AppError::new(ErrorCode::CryptoEncryptFailed, error.to_string()))
+}
+
+fn decompress_payload(compressed: &[u8]) -> Result<Vec<u8>, AppError> {
+    let limit = u64::from(VaultPolicy::MaximumFileBytes.value()) + 1;
+    let mut decoder = GzDecoder::new(compressed).take(limit);
+    let mut plaintext = Vec::new();
+    decoder
+        .read_to_end(&mut plaintext)
+        .map_err(|error| AppError::new(ErrorCode::InvalidBackup, error.to_string()))?;
+    if plaintext.len() > VaultPolicy::MaximumFileBytes.value() as usize {
+        return Err(AppError::new(
+            ErrorCode::InvalidBackup,
+            "解压后的保险库载荷超过安全限制",
+        ));
+    }
+    Ok(plaintext)
 }
 
 /// 校验用户备份密码是否满足当前 vault 格式的最低强度要求。
@@ -335,6 +381,57 @@ mod tests {
             unlock_vault_key(&envelope, "new-password", &document.vault_id)
                 .expect("unlock rewrapped key"),
             key,
+        );
+    }
+
+    #[test]
+    fn new_documents_compress_plaintext_before_encryption() {
+        let plaintext = vec![b'a'; 128 * 1024];
+        let (document, key) = PortableVaultDocument::create(
+            &plaintext,
+            "correct-password",
+            "vault-id".to_string(),
+            1,
+        )
+        .expect("create compressed vault");
+        let ciphertext = STANDARD
+            .decode(&document.ciphertext)
+            .expect("decode ciphertext");
+
+        assert_eq!(
+            document.payload_encoding.as_deref(),
+            Some(VaultResource::PayloadEncodingGzip.as_str())
+        );
+        assert!(ciphertext.len() < plaintext.len() / 10);
+        assert_eq!(
+            document.decrypt_with_key(&key).expect("decompress"),
+            plaintext
+        );
+    }
+
+    #[test]
+    fn documents_without_an_encoding_remain_backward_compatible() {
+        let key = [7_u8; VAULT_KEY_BYTES];
+        let vault_id = "legacy-vault".to_string();
+        let revision = 4;
+        let envelope = wrap_vault_key(&key, "correct-password", &vault_id).expect("wrap key");
+        let aad = payload_aad(&vault_id, revision);
+        let (payload_nonce, ciphertext) =
+            encrypt_bytes(&key, b"legacy-plaintext", aad.as_bytes()).expect("encrypt legacy");
+        let document = PortableVaultDocument {
+            format: VaultResource::Format.as_str().to_string(),
+            vault_id,
+            revision,
+            updated_at: chrono::Utc::now().to_rfc3339(),
+            key_envelope: envelope,
+            payload_nonce,
+            payload_encoding: None,
+            ciphertext,
+        };
+
+        assert_eq!(
+            document.decrypt_with_key(&key).expect("decrypt legacy"),
+            b"legacy-plaintext"
         );
     }
 }

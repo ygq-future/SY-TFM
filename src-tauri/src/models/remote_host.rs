@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::enums::Protocol;
 
 /// 远程主机配置（替代旧版 FtpHost，支持多种协议）。
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/types/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteHost {

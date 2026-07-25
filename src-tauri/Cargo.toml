@@ -28,7 +28,6 @@ futures-util = { version = "0.3", optional = true }
 chrono = "0.4"
 aes-gcm = "0.10"
 argon2 = "0.5"
-keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native-sync-persistent", "crypto-rust"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 directories = "6"
 parking_lot = "0.12"
@@ -39,12 +38,21 @@ anyhow = "1"
 thiserror = "2"
 async-trait = "0.1"
 base64 = "0.22"
+sha2 = "0.10"
+flate2 = "1"
 ts-rs = { version = "11", features = ["uuid-impl", "serde-json-impl"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native-sync-persistent", "crypto-rust"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+sy-tfm-android-storage = { path = "plugins/android-storage" }
+sy-tfm-secure-storage = { path = "plugins/secure-storage" }
 
 [features]
 # 发布构建默认启用生产资源协议与首版协议 adapter；`tauri dev` 会由 CLI 关闭默认 feature。

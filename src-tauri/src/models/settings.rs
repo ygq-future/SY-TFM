@@ -35,6 +35,9 @@ pub struct AppSettings {
     /// 文件元数据与状态数据字号（像素）。
     #[serde(default = "default_data_font_size")]
     pub data_font_size: u8,
+    /// Android 应用标题栏内容高度（不含系统安全区，像素）。
+    #[serde(default = "default_mobile_titlebar_height")]
+    pub mobile_titlebar_height: u8,
     /// 默认下载路径（null = 使用平台默认）
     #[serde(default)]
     pub default_download_path: Option<String>,
@@ -87,27 +90,65 @@ fn default_language() -> Language {
 
 /// 默认界面基础字号。
 fn default_font_size() -> u8 {
-    13
+    platform_typography_defaults().font_size
 }
 
 /// 默认标题字号。
 fn default_heading_font_size() -> u8 {
-    15
+    platform_typography_defaults().heading_font_size
 }
 
 /// 默认标签字号。
 fn default_label_font_size() -> u8 {
-    12
+    platform_typography_defaults().label_font_size
 }
 
 /// 默认提示字号。
 fn default_caption_font_size() -> u8 {
-    11
+    platform_typography_defaults().caption_font_size
 }
 
 /// 默认数据字号。
 fn default_data_font_size() -> u8 {
-    12
+    platform_typography_defaults().data_font_size
+}
+
+/// 默认 Android 应用标题栏内容高度。
+fn default_mobile_titlebar_height() -> u8 {
+    48
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TypographyDefaults {
+    font_size: u8,
+    heading_font_size: u8,
+    label_font_size: u8,
+    caption_font_size: u8,
+    data_font_size: u8,
+}
+
+const fn typography_defaults(is_android: bool) -> TypographyDefaults {
+    if is_android {
+        TypographyDefaults {
+            font_size: 15,
+            heading_font_size: 20,
+            label_font_size: 14,
+            caption_font_size: 11,
+            data_font_size: 13,
+        }
+    } else {
+        TypographyDefaults {
+            font_size: 13,
+            heading_font_size: 15,
+            label_font_size: 12,
+            caption_font_size: 11,
+            data_font_size: 12,
+        }
+    }
+}
+
+fn platform_typography_defaults() -> TypographyDefaults {
+    typography_defaults(cfg!(target_os = "android"))
 }
 
 /// 默认背景不透明度。
@@ -146,6 +187,7 @@ impl Default for AppSettings {
             label_font_size: default_label_font_size(),
             caption_font_size: default_caption_font_size(),
             data_font_size: default_data_font_size(),
+            mobile_titlebar_height: default_mobile_titlebar_height(),
             default_download_path: None,
             default_data_path: None,
             hosts: vec![],
@@ -158,5 +200,45 @@ impl Default for AppSettings {
             vault_sync: VaultSyncSettings::default(),
             config_version: default_config_version(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{typography_defaults, AppSettings};
+
+    #[test]
+    fn typography_defaults_are_platform_specific() {
+        let desktop = typography_defaults(false);
+        let android = typography_defaults(true);
+
+        assert_eq!(
+            (
+                desktop.font_size,
+                desktop.heading_font_size,
+                desktop.label_font_size,
+                desktop.caption_font_size,
+                desktop.data_font_size,
+            ),
+            (13, 15, 12, 11, 12),
+        );
+        assert_eq!(
+            (
+                android.font_size,
+                android.heading_font_size,
+                android.label_font_size,
+                android.caption_font_size,
+                android.data_font_size,
+            ),
+            (15, 20, 14, 11, 13),
+        );
+    }
+
+    #[test]
+    fn android_titlebar_height_has_a_backward_compatible_default() {
+        let settings: AppSettings =
+            serde_json::from_str("{}").expect("settings should deserialize");
+
+        assert_eq!(settings.mobile_titlebar_height, 48);
     }
 }

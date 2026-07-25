@@ -108,6 +108,7 @@ pub fn migrate_v1_to_v3(old_path: &Path, _new_path: &Path) -> Result<AppSettings
         label_font_size: 12,
         caption_font_size: 11,
         data_font_size: 12,
+        mobile_titlebar_height: 48,
         default_download_path: legacy.default_download_path,
         default_data_path: None,
         hosts,

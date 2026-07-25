@@ -656,6 +656,51 @@ pub async fn disconnect_host(
 }
 
 /// 将远程文本文件读取到内存，供内置在线编辑器使用。
+fn decode_online_edit_text(bytes: Vec<u8>) -> Result<String, AppError> {
+    let text = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        String::from_utf8(bytes[3..].to_vec())
+            .map_err(|_| AppError::unsupported("This file is binary and cannot be edited online"))?
+    } else if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) {
+        let little_endian = bytes.starts_with(&[0xFF, 0xFE]);
+        let body = &bytes[2..];
+        if body.len() % 2 != 0 {
+            return Err(AppError::unsupported(
+                "This file is binary and cannot be edited online",
+            ));
+        }
+        let units = body.chunks_exact(2).map(|pair| {
+            if little_endian {
+                u16::from_le_bytes([pair[0], pair[1]])
+            } else {
+                u16::from_be_bytes([pair[0], pair[1]])
+            }
+        });
+        std::char::decode_utf16(units)
+            .collect::<Result<String, _>>()
+            .map_err(|_| AppError::unsupported("This file is not valid text"))?
+    } else {
+        String::from_utf8(bytes)
+            .map_err(|_| AppError::unsupported("This file is binary and cannot be edited online"))?
+    };
+
+    let character_count = text.chars().count();
+    let suspicious_controls = text
+        .chars()
+        .filter(|character| {
+            character.is_control() && !matches!(character, '\n' | '\r' | '\t' | '\u{000C}')
+        })
+        .count();
+    if text.contains('\0')
+        || (character_count > 0 && suspicious_controls.saturating_mul(20) > character_count)
+    {
+        return Err(AppError::unsupported(
+            "This file is binary and cannot be edited online",
+        ));
+    }
+    Ok(text)
+}
+
+/// 将远程文本文件读取到内存，供内置在线编辑器使用。
 #[tauri::command]
 pub async fn read_remote_text(
     host_id: String,
@@ -680,13 +725,39 @@ pub async fn read_remote_text(
             )));
         }
         let bytes = tokio::fs::read(&temporary_path).await?;
-        String::from_utf8(bytes).map_err(|_| {
-            AppError::unsupported("This file is not UTF-8 text and cannot be edited online")
-        })
+        decode_online_edit_text(bytes)
     }
     .await;
     let _ = tokio::fs::remove_file(&temporary_path).await;
     result
+}
+
+#[cfg(test)]
+mod online_edit_detection_tests {
+    use super::decode_online_edit_text;
+
+    #[test]
+    fn extensionless_utf8_text_is_editable() {
+        let content = b"export PATH=\"$HOME/bin:$PATH\"\n".to_vec();
+        assert_eq!(
+            decode_online_edit_text(content).expect("shell profile should be text"),
+            "export PATH=\"$HOME/bin:$PATH\"\n"
+        );
+    }
+
+    #[test]
+    fn utf16_text_with_bom_is_editable() {
+        let content = vec![0xFF, 0xFE, b'h', 0, b'i', 0, b'\n', 0];
+        assert_eq!(
+            decode_online_edit_text(content).expect("UTF-16 text should be decoded"),
+            "hi\n"
+        );
+    }
+
+    #[test]
+    fn nul_and_control_heavy_content_is_rejected_as_binary() {
+        assert!(decode_online_edit_text(vec![0, 1, 2, 3, 4, 5]).is_err());
+    }
 }
 
 /// 启动外部编辑会话并返回本地临时文件路径。
@@ -963,10 +1034,28 @@ pub async fn download_file(
     transfer_manager: tauri::State<'_, TransferManager>,
 ) -> Result<(), AppError> {
     let uuid = parse_uuid(&request.host_id)?;
-    let local_path =
-        download_target_path(Path::new(&request.local_directory), &request.local_name)?;
+    #[cfg(target_os = "android")]
+    let publish_to_public_downloads =
+        Path::new(&request.local_directory) == android_public_download_path();
+    #[cfg(target_os = "android")]
+    let staging_root = if publish_to_public_downloads {
+        Some(
+            SettingsService::default_data_dir()?
+                .join(AppDirectory::AndroidDownloadStaging.as_str())
+                .join(Uuid::new_v4().to_string()),
+        )
+    } else {
+        None
+    };
+    #[cfg(target_os = "android")]
+    let local_directory = staging_root
+        .as_deref()
+        .unwrap_or_else(|| Path::new(&request.local_directory));
+    #[cfg(not(target_os = "android"))]
+    let local_directory = Path::new(&request.local_directory);
+    let local_path = download_target_path(local_directory, &request.local_name)?;
     let cancellation = transfer_manager.cancellation(&request.operation_id).await?;
-    if request.is_directory {
+    let result = if request.is_directory {
         download_directory_tree(
             &app,
             &session_manager,
@@ -994,7 +1083,19 @@ pub async fn download_file(
             cancellation,
         )
         .await
+    };
+
+    #[cfg(target_os = "android")]
+    if let Some(staging_root) = staging_root {
+        let result = match result {
+            Ok(()) => publish_android_download_tree(&staging_root),
+            Err(error) => Err(error),
+        };
+        let _ = tokio::fs::remove_dir_all(&staging_root).await;
+        return result;
     }
+
+    result
 }
 
 /// 上传文件（本地路径）。
@@ -1196,7 +1297,6 @@ pub fn load_settings() -> Result<AppSettings, AppError> {
 #[tauri::command]
 pub fn save_settings(settings: AppSettings) -> Result<(), AppError> {
     SettingsService::save(&settings)?;
-    crate::core::vault_sync::schedule_auto_sync();
     Ok(())
 }
 
@@ -1269,7 +1369,7 @@ pub async fn save_vault_backup_password(
     crate::core::vault_sync::save_backup_password(password, confirmation).await
 }
 
-/// 立即把当前设置上传为新的保险库 revision。
+/// 立即双向核对云端保险库，只在本地范围确有变化时上传新的 revision。
 #[tauri::command]
 pub async fn sync_vault_now(backup_password: Option<String>) -> Result<VaultSyncStatus, AppError> {
     crate::core::vault_sync::sync_now(backup_password).await
@@ -1317,30 +1417,87 @@ pub fn import_portable_vault(
 /// 获取当前平台解析后的默认下载与应用数据目录。
 #[tauri::command]
 pub fn get_storage_paths() -> Result<crate::models::StoragePaths, AppError> {
-    let user_dirs = directories::UserDirs::new().ok_or_else(|| {
-        AppError::new(
-            crate::enums::ErrorCode::PlatformUnsupported,
-            "无法确定当前用户目录",
-        )
-    })?;
-    let download_path =
-        resolved_download_path(user_dirs.download_dir().unwrap_or(user_dirs.home_dir()));
+    let default_data_path = SettingsService::default_data_dir()?;
+    #[cfg(target_os = "android")]
+    let download_path = android_public_download_path();
+    #[cfg(not(target_os = "android"))]
+    let download_path = directories::UserDirs::new()
+        .map(|user_dirs| {
+            resolved_download_path(user_dirs.download_dir().unwrap_or(user_dirs.home_dir()))
+        })
+        .unwrap_or_else(|| default_data_path.join(AppDirectory::DownloadRoot.as_str()));
     Ok(crate::models::StoragePaths {
         default_download_path: download_path.to_string_lossy().into_owned(),
-        default_data_path: SettingsService::default_data_dir()?
-            .to_string_lossy()
-            .into_owned(),
+        default_data_path: default_data_path.to_string_lossy().into_owned(),
         portable_mode: crate::storage::portable_mode::portable_data_dir()?.is_some(),
     })
 }
 
+/// 返回当前构建是否运行于移动平台。
+#[tauri::command]
+pub const fn is_mobile_platform() -> bool {
+    cfg!(mobile)
+}
+
+#[cfg(not(target_os = "android"))]
 fn resolved_download_path(base: &Path) -> PathBuf {
     base.join(AppDirectory::DownloadRoot.as_str())
+}
+
+#[cfg(target_os = "android")]
+fn android_public_download_path() -> PathBuf {
+    Path::new(AppDirectory::AndroidPublicDownloads.as_str())
+        .join(AppDirectory::DownloadRoot.as_str())
+}
+
+#[cfg(target_os = "android")]
+fn publish_android_download_tree(staging_root: &Path) -> Result<(), AppError> {
+    let mut pending = vec![staging_root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory).map_err(storage_write_error)? {
+            let entry = entry.map_err(storage_write_error)?;
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            let display_name = entry.file_name().to_string_lossy().into_owned();
+            let parent = path.parent().unwrap_or(staging_root);
+            let relative_parent = parent
+                .strip_prefix(staging_root)
+                .map_err(storage_write_error)?;
+            let media_directory = Path::new(AppDirectory::AndroidMediaDownloads.as_str())
+                .join(AppDirectory::DownloadRoot.as_str())
+                .join(relative_parent)
+                .to_string_lossy()
+                .replace('\\', "/");
+            sy_tfm_android_storage::publish(
+                &path.to_string_lossy(),
+                &display_name,
+                &media_directory,
+            )
+            .map_err(storage_write_error)?;
+        }
+    }
+    Ok(())
 }
 
 /// 安全读取本地背景图片并转换为 WebView 可直接使用的 Data URL。
 #[tauri::command]
 pub fn load_background_image(file_path: String) -> Result<String, AppError> {
+    let (mime, bytes) = read_background_image(&file_path)?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    Ok(format!("data:{mime};base64,{encoded}"))
+}
+
+/// 以 Tauri 原始二进制响应读取背景图片，避免 Android WebView 传输超长 Base64 字符串。
+#[tauri::command]
+pub fn load_background_image_bytes(file_path: String) -> Result<tauri::ipc::Response, AppError> {
+    let (_, bytes) = read_background_image(&file_path)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+fn read_background_image(file_path: &str) -> Result<(&'static str, Vec<u8>), AppError> {
     let path = std::path::PathBuf::from(file_path);
     let extension = path
         .extension()
@@ -1349,7 +1506,7 @@ pub fn load_background_image(file_path: String) -> Result<String, AppError> {
         .ok_or_else(|| {
             AppError::new(
                 crate::enums::ErrorCode::StorageReadFailed,
-                "背景图片缺少有效扩展名",
+                "Background image has no supported extension",
             )
         })?;
     let mime = match extension.as_str() {
@@ -1362,7 +1519,7 @@ pub fn load_background_image(file_path: String) -> Result<String, AppError> {
         _ => {
             return Err(AppError::new(
                 crate::enums::ErrorCode::StorageReadFailed,
-                "不支持的背景图片格式",
+                "Unsupported background image format",
             ));
         }
     };
@@ -1370,12 +1527,21 @@ pub fn load_background_image(file_path: String) -> Result<String, AppError> {
     if metadata.len() > 20 * 1024 * 1024 {
         return Err(AppError::new(
             crate::enums::ErrorCode::StorageReadFailed,
-            "背景图片不能超过 20 MB",
+            "Background image exceeds 20 MB",
         ));
     }
     let bytes = std::fs::read(path)?;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-    Ok(format!("data:{mime};base64,{encoded}"))
+    Ok((mime, bytes))
+}
+
+/// 将 Android Photo Picker 返回的临时 URI 导入应用私有存储。
+#[tauri::command]
+pub fn import_background_image(file_path: String) -> Result<String, AppError> {
+    #[cfg(target_os = "android")]
+    if file_path.starts_with("content://") {
+        return sy_tfm_android_storage::import_image(&file_path).map_err(storage_write_error);
+    }
+    Ok(file_path)
 }
 
 /// 获取界面基础字号。
@@ -1390,7 +1556,6 @@ pub fn set_font_size(font_size: u8) -> Result<(), AppError> {
     let mut settings = SettingsService::load()?;
     settings.font_size = font_size.clamp(10, 18);
     SettingsService::save(&settings)?;
-    crate::core::vault_sync::schedule_auto_sync();
     Ok(())
 }
 
@@ -1405,6 +1570,10 @@ enum PasswordUpdate {
     Preserve,
     Clear,
     Replace,
+}
+
+fn host_unchanged(existing: Option<&RemoteHost>, updated: &RemoteHost) -> bool {
+    existing.is_some_and(|existing| existing == updated)
 }
 
 fn password_update(existing: &str, incoming: &str, clear_password: bool) -> PasswordUpdate {
@@ -1423,11 +1592,15 @@ fn password_update(existing: &str, incoming: &str, clear_password: bool) -> Pass
 #[tauri::command]
 pub fn save_host(host: RemoteHost, clear_password: Option<bool>) -> Result<(), AppError> {
     let mut settings = SettingsService::load()?;
+    crate::core::vault_sync::capture_host_sync_baseline(&mut settings)?;
     let mut host = host;
-    let existing_password = settings
+    let existing_host = settings
         .hosts
         .iter()
         .find(|existing| existing.id == host.id)
+        .cloned();
+    let existing_password = existing_host
+        .as_ref()
         .map(|existing| existing.password.as_str())
         .unwrap_or_default();
 
@@ -1448,6 +1621,10 @@ pub fn save_host(host: RemoteHost, clear_password: Option<bool>) -> Result<(), A
                 host.password = protector.encrypt(&host.password)?;
             }
         }
+    }
+
+    if host_unchanged(existing_host.as_ref(), &host) {
+        return Ok(());
     }
 
     if let Some(existing) = settings.hosts.iter_mut().find(|h| h.id == host.id) {
@@ -1497,6 +1674,7 @@ pub fn reorder_hosts(host_ids: Vec<String>) -> Result<(), AppError> {
         .map(|id| parse_uuid(id))
         .collect::<Result<Vec<_>, _>>()?;
     let mut settings = SettingsService::load()?;
+    crate::core::vault_sync::capture_host_sync_baseline(&mut settings)?;
     settings.hosts = reorder_hosts_in_memory(&settings.hosts, &host_ids)?;
     SettingsService::save(&settings)?;
     crate::core::vault_sync::schedule_auto_sync();
@@ -1639,6 +1817,31 @@ mod password_update_tests {
     }
 
     #[test]
+    fn unchanged_host_is_detected_after_password_preservation() {
+        let existing = RemoteHost {
+            id: Uuid::from_u128(42),
+            name: "unchanged".to_string(),
+            protocol: crate::enums::Protocol::Sftp,
+            host: "example.com".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            password: "enc.v1:protected".to_string(),
+            tags: String::new(),
+            download_path: None,
+            https: true,
+            base_path: None,
+            sftp_host_key_fingerprint: None,
+            is_connected: false,
+        };
+
+        assert!(host_unchanged(Some(&existing), &existing));
+        let mut changed = existing.clone();
+        changed.name = "changed".to_string();
+        assert!(!host_unchanged(Some(&existing), &changed));
+        assert!(!host_unchanged(None, &existing));
+    }
+
+    #[test]
     fn default_download_path_uses_the_app_subdirectory() {
         let resolved = resolved_download_path(Path::new("Downloads"));
         assert_eq!(
@@ -1688,6 +1891,7 @@ mod password_update_tests {
 pub fn delete_host(host_id: String) -> Result<(), AppError> {
     let uuid = parse_uuid(&host_id)?;
     let mut settings = SettingsService::load()?;
+    crate::core::vault_sync::capture_host_sync_baseline(&mut settings)?;
     settings.hosts.retain(|h| h.id != uuid);
     SettingsService::save(&settings)?;
     crate::core::vault_sync::schedule_auto_sync();
@@ -1705,6 +1909,7 @@ pub fn export_hosts() -> Result<Vec<HostDto>, AppError> {
 #[tauri::command]
 pub fn import_hosts(hosts: Vec<HostDto>) -> Result<(), AppError> {
     let mut settings = SettingsService::load()?;
+    crate::core::vault_sync::capture_host_sync_baseline(&mut settings)?;
     for dto in hosts {
         let host = RemoteHost {
             id: Uuid::new_v4(),

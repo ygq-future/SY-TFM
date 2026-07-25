@@ -7,6 +7,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "android:prepare": "bun scripts/prepare-android.mjs",
+    "android:before-dev": "bun run android:prepare && bun run dev",
+    "android:before-build": "bun run android:prepare && bun run build",
     "preview": "vite preview",
     "lint": "eslint src",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\"",

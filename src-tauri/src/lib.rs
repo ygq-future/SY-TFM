@@ -25,7 +25,6 @@ pub mod transport;
 
 use core::{EditSessionManager, SessionManager, TransferManager};
 
-#[cfg(desktop)]
 use tauri::Manager;
 
 /// 启动 Tauri 应用：组装命令并运行事件循环。
@@ -42,8 +41,22 @@ pub fn run() {
             let _ = window.set_focus();
         }
     }));
+    #[cfg(target_os = "android")]
+    let builder = builder
+        .plugin(sy_tfm_secure_storage::init())
+        .plugin(sy_tfm_android_storage::init());
 
     let result = builder
+        .setup(|app| {
+            #[cfg(mobile)]
+            {
+                let data_dir = app.path().app_data_dir()?;
+                crate::storage::settings::SettingsService::set_platform_data_dir(data_dir);
+            }
+            #[cfg(not(mobile))]
+            let _ = app;
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(SessionManager::new())
@@ -99,7 +112,10 @@ pub fn run() {
             commands::export_portable_vault,
             commands::import_portable_vault,
             commands::get_storage_paths,
+            commands::is_mobile_platform,
             commands::load_background_image,
+            commands::load_background_image_bytes,
+            commands::import_background_image,
             commands::get_font_size,
             commands::set_font_size,
             commands::get_hosts,

@@ -1,0 +1,16 @@
+[package]
+name = "sy-tfm-secure-storage"
+version = "1.0.0"
+edition = "2021"
+links = "sy-tfm-secure-storage"
+
+[lib]
+name = "sy_tfm_secure_storage"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2", default-features = false }
+thiserror = "2"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }

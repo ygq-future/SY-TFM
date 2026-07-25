@@ -2,6 +2,7 @@
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use directories::ProjectDirs;
 
@@ -13,7 +14,14 @@ use crate::{crypto::key_storage, crypto::secret_protector::SecretProtector};
 /// 应用配置服务。
 pub struct SettingsService;
 
+static PLATFORM_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+
 impl SettingsService {
+    /// 注入由 Tauri 平台路径解析器提供的应用数据目录。
+    pub fn set_platform_data_dir(path: PathBuf) {
+        let _ = PLATFORM_DATA_DIR.set(path);
+    }
+
     /// 加载配置。
     ///
     /// 文件不存在则返回默认值；损坏则回退默认值（最佳努力，不丢失主机列表由后续迁移保障）。
@@ -86,6 +94,9 @@ impl SettingsService {
     pub fn default_data_dir() -> Result<PathBuf, AppError> {
         if let Some(portable_data_dir) = crate::storage::portable_mode::portable_data_dir()? {
             return Ok(portable_data_dir);
+        }
+        if let Some(path) = PLATFORM_DATA_DIR.get() {
+            return Ok(path.clone());
         }
         let proj = ProjectDirs::from("com", "sy", "SY-TFM")
             .ok_or_else(|| AppError::new(ErrorCode::PlatformUnsupported, "无法确定平台配置目录"))?;

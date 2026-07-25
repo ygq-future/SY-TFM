@@ -61,6 +61,18 @@ pub struct VaultSyncSettings {
     /// 最近一次成功同步时间（RFC 3339）。
     #[serde(default)]
     pub last_synced_at: Option<String>,
+    /// 上次同步时“共享主机 + 当前平台分区”的 SHA-256 内容指纹。
+    #[serde(default)]
+    pub last_synced_scope_hash: String,
+    /// 上次同步时共享主机集合的独立 SHA-256 内容指纹。
+    #[serde(default)]
+    pub last_synced_hosts_hash: String,
+    /// 由本机设备密钥加密的上次已同步主机快照，用于逐主机三方合并。
+    #[serde(default)]
+    pub last_synced_hosts_snapshot: String,
+    /// 上次同步时当前平台设置分区的独立 SHA-256 内容指纹。
+    #[serde(default)]
+    pub last_synced_platform_hash: String,
 }
 
 /// 前端提交的 WebDAV 恢复引导凭据。
