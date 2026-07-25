@@ -41,4 +41,20 @@ export type VaultSyncSettings = {
    * 最近一次成功同步时间（RFC 3339）。
    */
   lastSyncedAt: string | null;
+  /**
+   * 上次同步时“共享主机 + 当前平台分区”的 SHA-256 内容指纹。
+   */
+  lastSyncedScopeHash: string;
+  /**
+   * 上次同步时共享主机集合的独立 SHA-256 内容指纹。
+   */
+  lastSyncedHostsHash: string;
+  /**
+   * 由本机设备密钥加密的上次已同步主机快照，用于逐主机三方合并。
+   */
+  lastSyncedHostsSnapshot: string;
+  /**
+   * 上次同步时当前平台设置分区的独立 SHA-256 内容指纹。
+   */
+  lastSyncedPlatformHash: string;
 };

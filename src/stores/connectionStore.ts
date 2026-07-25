@@ -26,6 +26,7 @@ interface ConnectionState {
 
   // 动作
   loadHosts: () => Promise<void>;
+  refreshHosts: () => Promise<void>;
   selectHost: (id: string | null) => void;
   connectHost: (id: string, password?: string) => Promise<void>;
   disconnectHost: (id: string) => Promise<void>;
@@ -53,6 +54,17 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
       set({ hosts, isLoading: false });
     } catch (e) {
       set({ isLoading: false, error: formatAppError(e) });
+    }
+  },
+
+  refreshHosts: async () => {
+    try {
+      const hosts = await tauri.getHosts();
+      set((state) =>
+        JSON.stringify(state.hosts) === JSON.stringify(hosts) ? state : { hosts, error: null },
+      );
+    } catch (e) {
+      set({ error: formatAppError(e) });
     }
   },
 

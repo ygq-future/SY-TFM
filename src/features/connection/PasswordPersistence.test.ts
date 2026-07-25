@@ -12,28 +12,41 @@ describe('password persistence contract', () => {
       new URL('../../../src-tauri/src/commands/mod.rs', import.meta.url),
       'utf8',
     );
-    const hostList = readFileSync(new URL('./HostList.tsx', import.meta.url), 'utf8');
+    const connectionFlow = readFileSync(
+      new URL('./useHostConnectionFlow.tsx', import.meta.url),
+      'utf8',
+    );
 
     expect(commands).toContain('clear_password');
     expect(commands).toContain('PasswordUpdate::Preserve');
-    expect(hostList).toContain('rememberPassword');
-    expect(hostList).toContain('await updateHost');
+    expect(connectionFlow).toContain('rememberPassword');
+    expect(connectionFlow).toContain('await updateHost');
   });
 
   it('keeps the attempted password while requiring explicit TOFU confirmation', () => {
+    const connectionFlow = readFileSync(
+      new URL('./useHostConnectionFlow.tsx', import.meta.url),
+      'utf8',
+    );
     const hostList = readFileSync(new URL('./HostList.tsx', import.meta.url), 'utf8');
+    const paneHostSelect = readFileSync(
+      new URL('../browser/PaneHostSelect.tsx', import.meta.url),
+      'utf8',
+    );
 
-    expect(hostList).toContain('password?: string');
-    expect(hostList).toContain('rememberPassword: boolean');
-    expect(hostList).toContain('getHostKeyUnknownDetails(error)');
-    expect(hostList).toContain('setPendingHostKey');
-    expect(hostList).toContain('sftpHostKeyFingerprint: pending.fingerprint');
-    expect(hostList).toContain(
+    expect(connectionFlow).toContain('password?: string');
+    expect(connectionFlow).toContain('rememberPassword: boolean');
+    expect(connectionFlow).toContain('getHostKeyUnknownDetails(error)');
+    expect(connectionFlow).toContain('setPendingHostKey');
+    expect(connectionFlow).toContain('sftpHostKeyFingerprint: pending.fingerprint');
+    expect(connectionFlow).toContain(
       "password: pending.rememberPassword ? (pending.password ?? '') : ''",
     );
-    expect(hostList).toContain('await updateHost(trustedHost)');
-    expect(hostList).toContain('await connectAndOpen(trustedHost, pending.password)');
-    expect(hostList).toContain('onCancel={() => setPendingHostKey(null)}');
-    expect(hostList).not.toContain('getHostKeyChangedDetails(error)');
+    expect(connectionFlow).toContain('await updateHost(trustedHost)');
+    expect(connectionFlow).toContain('await connectAndOpen(trustedHost, pending.password)');
+    expect(connectionFlow).toContain('onCancel={() => setPendingHostKey(null)}');
+    expect(connectionFlow).not.toContain('getHostKeyChangedDetails(error)');
+    expect(hostList).toContain('useHostConnectionFlow(onSelectHost)');
+    expect(paneHostSelect).toContain('useHostConnectionFlow');
   });
 });

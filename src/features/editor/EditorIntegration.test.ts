@@ -39,9 +39,23 @@ describe('remote editor integration', () => {
     const app = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
     const saveStart = app.indexOf('onSave={async (content)');
     const saveFlow = app.slice(saveStart, app.indexOf('\n          />', saveStart));
-    expect(saveFlow).toContain("setOperationMessage(\n                  t('editor.synced'");
+    expect(saveFlow).toContain("setEditorOperationMessage(\n                    t('editor.synced'");
     expect(saveFlow).not.toContain('startTransfer({');
     expect(saveFlow).not.toContain('updateTransfer(');
+  });
+
+  it('clears editor-owned notices when online edit closes or an external editor opens', () => {
+    const app = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
+    const onlineEditorStart = app.indexOf('{onlineEditor && (');
+    const onlineEditorEnd = app.indexOf("{dialog?.type === 'mkdir'", onlineEditorStart);
+    const onlineEditorFlow = app.slice(onlineEditorStart, onlineEditorEnd);
+    const remoteEditStart = app.indexOf('const handleRemoteEdit');
+    const remoteEditEnd = app.indexOf('const handleDelete', remoteEditStart);
+    const remoteEditFlow = app.slice(remoteEditStart, remoteEditEnd);
+
+    expect(onlineEditorFlow).toContain('clearEditorOperationMessage()');
+    expect(remoteEditFlow).toContain('clearEditorOperationMessage()');
+    expect(remoteEditFlow).not.toContain("t('editor.openedExternal'");
   });
 
   it('bounds the status bar and every transfer item to the typography-aware height', () => {
@@ -52,17 +66,21 @@ describe('remote editor integration', () => {
     expect(styles).toContain('.transfer-task > svg');
   });
 
-  it('blocks unsupported binary files before either edit transport is invoked', () => {
+  it('detects online text from content while keeping external edit extension-gated', () => {
     const appSource = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
-    expect(appSource).toContain('isEditableTextFile(file.name)');
-    expect(appSource).toContain('setUnsupportedEditFile(file)');
-    expect(appSource).toContain('<AlertDialog');
-    expect(appSource.indexOf('isEditableTextFile(file.name)')).toBeLessThan(
-      appSource.indexOf('readRemoteText(hostId, file.fullPath)'),
+    const commands = readFileSync(
+      new URL('../../../src-tauri/src/commands/mod.rs', import.meta.url),
+      'utf8',
     );
-    expect(appSource.indexOf('isEditableTextFile(file.name)')).toBeLessThan(
-      appSource.indexOf('startRemoteEdit(hostId, file.fullPath, file.name)'),
-    );
+    const onlineStart = appSource.indexOf('const handleOnlineEdit');
+    const remoteStart = appSource.indexOf('const handleRemoteEdit');
+    const onlineFlow = appSource.slice(onlineStart, remoteStart);
+    const remoteFlow = appSource.slice(remoteStart, appSource.indexOf('const handleDelete'));
+    expect(onlineFlow).toContain('readRemoteText(hostId, file.fullPath)');
+    expect(onlineFlow).not.toContain('isEditableTextFile(file.name)');
+    expect(remoteFlow).toContain('isEditableTextFile(file.name)');
+    expect(commands).toContain('decode_online_edit_text(bytes)');
+    expect(commands).toContain("text.contains('\\0')");
   });
 
   it('reuses active remote edit watchers and exposes them from the path toolbar', () => {

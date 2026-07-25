@@ -26,4 +26,17 @@ describe('global modal mounting', () => {
       '<ModalPortal>',
     );
   });
+
+  it('marks every body portal as an active application overlay', () => {
+    const source = readFileSync(new URL('./ModalPortal.tsx', import.meta.url), 'utf8');
+    expect(source).toContain('data-app-overlay');
+  });
+
+  it('closes anchored mobile popovers on pointer-away and touch-drag interaction', () => {
+    const source = readFileSync(new URL('./AnchoredPortal.tsx', import.meta.url), 'utf8');
+    expect(source).toContain("document.addEventListener('pointerdown'");
+    expect(source).toContain('handleTouchMove');
+    expect(source).toContain("classList.contains('mobile-platform')");
+    expect(source).toContain('markAppOverlayPointerSequence()');
+  });
 });

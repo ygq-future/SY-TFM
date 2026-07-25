@@ -37,6 +37,31 @@ describe('HostEditDialog', () => {
     expect(markup).toContain('class="field-download"');
   });
 
+  it('restores the desktop field proportions only on native Android', () => {
+    const css = readFileSync(new URL('../../index.css', import.meta.url), 'utf8');
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.host-editor \.protocol-picker\s*\{[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.host-editor \.field-name\s*\{[^}]*grid-column:\s*span\s+8/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.host-editor \.field-tags\s*\{[^}]*grid-column:\s*span\s+4/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.host-editor \.field-username\s*\{[^}]*grid-column:\s*span\s+5/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.host-editor \.field-password\s*\{[^}]*grid-column:\s*span\s+7/s,
+    );
+  });
+
+  it('gives passwords more space than usernames on the desktop editor', () => {
+    const css = readFileSync(new URL('../../index.css', import.meta.url), 'utf8');
+    expect(css).toMatch(/\.field-username\s*\{[^}]*grid-column:\s*span\s+5/s);
+    expect(css).toMatch(/\.field-password\s*\{[^}]*grid-column:\s*span\s+7/s);
+  });
+
   it('uses WebDAV URL, HTTP scheme and optional base path instead of a port switch', () => {
     useConnectionStore.setState({ addHost: vi.fn(), updateHost: vi.fn() });
     const markup = renderToStaticMarkup(
@@ -98,6 +123,29 @@ describe('HostEditDialog', () => {
     expect(source).toContain('className="saved-password-status"');
     expect(css).toMatch(/\.saved-password-row\s*\{[^}]*white-space:\s*nowrap/s);
     expect(css).toMatch(/\.saved-password-status\s*\{[^}]*text-overflow:\s*ellipsis/s);
+  });
+
+  it('exposes username and password semantics to Android WebView autofill', () => {
+    useConnectionStore.setState({ addHost: vi.fn(), updateHost: vi.fn() });
+    const markup = renderToStaticMarkup(<HostEditDialog host={null} onClose={vi.fn()} />);
+    const passwordPrompt = readFileSync(
+      new URL('./PasswordPromptDialog.tsx', import.meta.url),
+      'utf8',
+    );
+    const activity = readFileSync(
+      new URL(
+        '../../../src-tauri/gen/android/app/src/main/java/com/sy/tfm/MainActivity.kt',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+
+    expect(markup).toContain('autoComplete="username"');
+    expect(markup).toContain('name="username"');
+    expect(markup).toContain('autoComplete="current-password"');
+    expect(markup).toContain('name="password"');
+    expect(passwordPrompt).toContain('autoComplete="current-password"');
+    expect(activity).toContain('View.IMPORTANT_FOR_AUTOFILL_YES');
   });
 
   it('normalizes WebDAV hosts without carrying an SFTP fingerprint', () => {

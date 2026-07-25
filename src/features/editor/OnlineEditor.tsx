@@ -20,7 +20,7 @@ interface OnlineEditorProps {
   onClose: () => void;
 }
 
-/** 内置轻量文本编辑器：按扩展名加载语法高亮，保存时同步但保持窗口打开。 */
+/** 内置轻量文本编辑器：文件名只用于语法高亮，是否为文本由后端按内容判定。 */
 export function OnlineEditor({
   fileName,
   remotePath,
@@ -137,6 +137,7 @@ export function OnlineEditor({
 
           <div className="online-editor-body">
             <CodeMirror
+              className="online-editor-codemirror"
               value={content}
               height="100%"
               theme={theme}

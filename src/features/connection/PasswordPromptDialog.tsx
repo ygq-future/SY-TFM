@@ -52,6 +52,8 @@ export function PasswordPromptDialog({
               <KeyRound />
               <input
                 id="host-password"
+                name="password"
+                autoComplete="current-password"
                 autoFocus
                 type="password"
                 className="field-control"

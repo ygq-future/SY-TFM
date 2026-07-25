@@ -122,7 +122,7 @@ describe('browser view model', () => {
     expect(source).toContain('top: virtualStart');
     expect(source).not.toContain('translateY(${virtualStart}px)');
     expect(source).not.toContain('<DndContext');
-    expect(source).toContain("kind: 'blocked', paneIndex, hostId");
+    expect(source).toMatch(/kind:\s*'blocked'[\s\S]*?targetDirectory:\s*currentPath/);
     expect(source).not.toContain("t('browser.folderType')");
   });
 

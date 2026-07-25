@@ -17,17 +17,22 @@ import {
   Cloud,
   Download,
   Edit3,
+  FileCode2,
+  FilePlus2,
   FolderOpen,
+  FolderPlus,
   Home,
   LoaderCircle,
   RefreshCw,
+  Trash2,
   Upload,
   X,
 } from 'lucide-react';
 import {
   DndContext,
-  PointerSensor,
+  TouchSensor,
   pointerWithin,
+  rectIntersection,
   useSensor,
   useSensors,
   type CollisionDetection,
@@ -40,7 +45,9 @@ import {
   getStoragePaths,
   beginTransfer,
   finishTransfer,
+  backgroundImageMimeType,
   loadBackgroundImage,
+  loadBackgroundImageBytes,
   onConnectionStatus,
   onDownloadBatchProgress,
   onDownloadDone,
@@ -51,16 +58,16 @@ import {
   onEditorSessionInvalid,
   onEditorSynced,
   readRemoteText,
+  syncVaultNow,
   startRemoteEdit,
   uploadFile,
   uploadContent,
 } from './lib/tauri';
 import type { RemoteFile } from './types/generated/RemoteFile';
-import type { RemoteHost } from './types/generated/RemoteHost';
 import type { RemoteEditSessionInfo } from './types/generated/RemoteEditSessionInfo';
 import { useConnectionStore } from './stores/connectionStore';
 import { createTransferOperationId, useBrowserStore, type PaneIndex } from './stores/browserStore';
-import { useSettingsStore } from './stores/settingsStore';
+import { flushSettingsWrites, useSettingsStore } from './stores/settingsStore';
 import { useVaultSyncStore } from './stores/vaultSyncStore';
 import { HostList } from './features/connection/HostList';
 import { Breadcrumb } from './features/browser/Breadcrumb';
@@ -74,6 +81,7 @@ import { UploadZone } from './features/browser/UploadZone';
 import { ContextMenu } from './features/browser/ContextMenu';
 import { PaneHostSelect } from './features/browser/PaneHostSelect';
 import { RemoteEditSessionsMenu } from './features/editor/RemoteEditSessionsMenu';
+import { SettingsDialog } from './features/settings/SettingsDialog';
 import { AlertDialog, ConfirmDialog, InputDialog } from './components/shared/Dialog';
 import { ToastProvider } from './components/shared/ToastProvider';
 import { AppTitleBar } from './components/layout/AppTitleBar';
@@ -89,11 +97,17 @@ import { ModalPortal } from './components/shared/ModalPortal';
 import i18n from './lib/i18n';
 import { activateHostInPane, collapseToSinglePane, reconcilePaneHosts } from './lib/paneAssignment';
 import { cn } from './lib/utils';
-
-const SettingsDialog = lazy(async () => {
-  const module = await import('./features/settings/SettingsDialog');
-  return { default: module.SettingsDialog };
-});
+import { hasActiveAppOverlay } from './lib/overlayInteraction';
+import {
+  MOBILE_DIRECTORY_OVERLAP_THRESHOLD,
+  MOBILE_FILE_DRAG_GAP,
+  PlatformPointerSensor,
+  mobileDrawerDragProgress,
+  mobileDrawerTranslate,
+  mobileFileDragRect,
+  rectangleOverlapRatio,
+  settleMobileDrawer,
+} from './lib/dragSensors';
 
 const OnlineEditor = lazy(async () => {
   const module = await import('./features/editor/OnlineEditor');
@@ -103,12 +117,11 @@ const OnlineEditor = lazy(async () => {
 interface BrowserPageProps {
   paneIndex: PaneIndex;
   hostId: string;
-  connectedHosts: RemoteHost[];
   onHostChange: (hostId: string) => void;
 }
 
 /** 单个独立文件浏览面板。 */
-function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: BrowserPageProps) {
+function BrowserPage({ paneIndex, hostId, onHostChange }: BrowserPageProps) {
   const { t } = useTranslation();
   const browserPageRef = useRef<HTMLDivElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -128,6 +141,7 @@ function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: Browse
     startTransfer,
     updateTransfer,
     setOperationMessage,
+    clearOperationMessage,
     downloadSelected,
     deleteSelected,
     renameFile,
@@ -147,6 +161,8 @@ function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: Browse
     file: RemoteFile;
     content: string;
   } | null>(null);
+  const editorOperationMessageRef = useRef<string | null>(null);
+  const onlineEditorGenerationRef = useRef(0);
   const [unsupportedEditFile, setUnsupportedEditFile] = useState<RemoteFile | null>(null);
   const [dialog, setDialog] = useState<
     | { type: 'mkdir' }
@@ -155,6 +171,29 @@ function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: Browse
     | { type: 'deleteConfirm' }
     | null
   >(null);
+
+  const setEditorOperationMessage = useCallback(
+    (message: string, isError = false) => {
+      editorOperationMessageRef.current = message;
+      setOperationMessage(message, isError);
+    },
+    [setOperationMessage],
+  );
+
+  const clearEditorOperationMessage = useCallback(() => {
+    const message = editorOperationMessageRef.current;
+    if (message) clearOperationMessage(message);
+    editorOperationMessageRef.current = null;
+  }, [clearOperationMessage]);
+
+  useEffect(
+    () => () => {
+      onlineEditorGenerationRef.current += 1;
+      const message = editorOperationMessageRef.current;
+      if (message) useBrowserStore.getState().clearOperationMessage(message);
+    },
+    [],
+  );
 
   useEffect(() => {
     setCapabilities(paneIndex, activeCapability);
@@ -201,6 +240,7 @@ function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: Browse
 
   const handleContextMenu = useCallback((event: React.MouseEvent, file: RemoteFile | null) => {
     event.preventDefault();
+    if (document.documentElement.classList.contains('mobile-platform')) return;
     setContextMenu({ x: event.clientX, y: event.clientY, file });
   }, []);
 
@@ -232,23 +272,22 @@ function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: Browse
 
   const handleOnlineEdit = useCallback(
     async (file: RemoteFile) => {
-      if (!isEditableTextFile(file.name)) {
-        setUnsupportedEditFile(file);
-        return;
-      }
-      setOperationMessage(t('editor.opening', { name: file.name }));
+      const editorGeneration = ++onlineEditorGenerationRef.current;
+      setEditorOperationMessage(t('editor.opening', { name: file.name }));
       try {
         const content = await readRemoteText(hostId, file.fullPath);
+        if (onlineEditorGenerationRef.current !== editorGeneration) return;
         setOnlineEditor({ file, content });
-        setOperationMessage(t('editor.openedOnline', { name: file.name }));
+        setEditorOperationMessage(t('editor.openedOnline', { name: file.name }));
       } catch (error) {
-        setOperationMessage(
+        if (onlineEditorGenerationRef.current !== editorGeneration) return;
+        setEditorOperationMessage(
           t('editor.openFailed', { name: file.name, error: formatAppError(error) }),
           true,
         );
       }
     },
-    [hostId, setOperationMessage, t],
+    [hostId, setEditorOperationMessage, t],
   );
 
   const handleRemoteEdit = useCallback(
@@ -257,36 +296,36 @@ function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: Browse
         setUnsupportedEditFile(file);
         return;
       }
-      setOperationMessage(t('editor.opening', { name: file.name }));
+      setEditorOperationMessage(t('editor.opening', { name: file.name }));
       try {
         const remoteSession = await startRemoteEdit(hostId, file.fullPath, file.name);
         await openPath(remoteSession.localPath);
         setRemoteEditRevision((revision) => revision + 1);
-        setOperationMessage(t('editor.openedExternal', { name: file.name }));
+        clearEditorOperationMessage();
       } catch (error) {
-        setOperationMessage(
+        setEditorOperationMessage(
           t('editor.openFailed', { name: file.name, error: formatAppError(error) }),
           true,
         );
       }
     },
-    [hostId, setOperationMessage, t],
+    [clearEditorOperationMessage, hostId, setEditorOperationMessage, t],
   );
 
   const handleOpenRemoteSession = useCallback(
     async (session: RemoteEditSessionInfo) => {
-      setOperationMessage(t('editor.opening', { name: session.fileName }));
+      setEditorOperationMessage(t('editor.opening', { name: session.fileName }));
       try {
         await openPath(session.localPath);
-        setOperationMessage(t('editor.openedExternal', { name: session.fileName }));
+        clearEditorOperationMessage();
       } catch (error) {
-        setOperationMessage(
+        setEditorOperationMessage(
           t('editor.openFailed', { name: session.fileName, error: formatAppError(error) }),
           true,
         );
       }
     },
-    [setOperationMessage, t],
+    [clearEditorOperationMessage, setEditorOperationMessage, t],
   );
 
   const handleDelete = useCallback(async () => {
@@ -468,6 +507,8 @@ function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: Browse
       setOperationMessage(t('browser.copyFailed'), true);
     }
   }, [pane.currentPath, setOperationMessage, t]);
+  const mobileSelectedFiles = pane.selectedFiles.filter((file) => file.name !== '..');
+  const mobileActionFile = mobileSelectedFiles.length === 1 ? mobileSelectedFiles[0] : null;
 
   return (
     <div
@@ -488,7 +529,7 @@ function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: Browse
     >
       <section className="browser-toolbar" aria-label={t('browser.toolbar')}>
         <div className="path-cluster">
-          <PaneHostSelect hosts={connectedHosts} hostId={hostId} onChange={onHostChange} />
+          <PaneHostSelect hostId={hostId} onChange={onHostChange} />
           <Breadcrumb
             path={pane.currentPath}
             isEditing={isEditingPath}
@@ -507,7 +548,7 @@ function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: Browse
             <Home />
           </button>
           <button
-            className="icon-button"
+            className="icon-button path-edit-action"
             type="button"
             title={t('browser.editPath')}
             onClick={() => setIsEditingPath(true)}
@@ -561,11 +602,88 @@ function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: Browse
             onChange={(event) => void handlePickedFiles(Array.from(event.target.files ?? []))}
           />
         </div>
+        <div
+          className="mobile-file-actions"
+          aria-label={t('browser.selectionActions')}
+          data-drawer-gesture="exclude"
+        >
+          <button
+            className="mobile-file-action mobile-refresh-action"
+            type="button"
+            disabled={pane.isLoading}
+            onClick={() => void refresh(paneIndex, hostId)}
+          >
+            <RefreshCw className={pane.isLoading ? 'is-spinning' : ''} />
+            <span>{t('browser.refresh')}</span>
+          </button>
+          <button
+            className="mobile-file-action mobile-upload-action"
+            type="button"
+            onClick={() => uploadInputRef.current?.click()}
+          >
+            <Upload />
+            <span>{t('browser.upload')}</span>
+          </button>
+          <button
+            className="mobile-file-action"
+            type="button"
+            disabled={mobileSelectedFiles.length === 0}
+            onClick={() => void handleDownload()}
+          >
+            <Download />
+            <span>{t('browser.download')}</span>
+          </button>
+          <button
+            className="mobile-file-action"
+            type="button"
+            disabled={!mobileActionFile}
+            onClick={() =>
+              mobileActionFile && setDialog({ type: 'rename', file: mobileActionFile })
+            }
+          >
+            <Edit3 />
+            <span>{t('browser.rename')}</span>
+          </button>
+          <button
+            className="mobile-file-action mobile-file-action--danger"
+            type="button"
+            disabled={pane.selectedFiles.length === 0}
+            onClick={() => setDialog({ type: 'deleteConfirm' })}
+          >
+            <Trash2 />
+            <span>{t('common.delete')}</span>
+          </button>
+          <button
+            className="mobile-file-action"
+            type="button"
+            onClick={() => setDialog({ type: 'createFile' })}
+          >
+            <FilePlus2 />
+            <span>{t('browser.newFile')}</span>
+          </button>
+          <button
+            className="mobile-file-action"
+            type="button"
+            onClick={() => setDialog({ type: 'mkdir' })}
+          >
+            <FolderPlus />
+            <span>{t('browser.newFolder')}</span>
+          </button>
+          <button
+            className="mobile-file-action"
+            type="button"
+            disabled={!mobileActionFile || mobileActionFile.isDirectory}
+            onClick={() => mobileActionFile && void handleOnlineEdit(mobileActionFile)}
+          >
+            <FileCode2 />
+            <span>{t('contextMenu.onlineEdit')}</span>
+          </button>
+        </div>
       </section>
 
       <section className="file-workspace" aria-label={t('browser.remoteFiles')}>
         <div className="file-list-stage">
-          {pane.isLoading ? (
+          {pane.isLoading && pane.files.length === 0 ? (
             <div className="browser-state">
               <LoaderCircle className="is-spinning" />
               <strong>{t('browser.loadingTitle')}</strong>
@@ -625,27 +743,36 @@ function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: Browse
             fileName={onlineEditor.file.name}
             remotePath={onlineEditor.file.fullPath}
             initialContent={onlineEditor.content}
-            onClose={() => setOnlineEditor(null)}
+            onClose={() => {
+              onlineEditorGenerationRef.current += 1;
+              setOnlineEditor(null);
+              clearEditorOperationMessage();
+            }}
             onSave={async (content) => {
+              const editorGeneration = onlineEditorGenerationRef.current;
               const operationId = createTransferOperationId('localToRemote');
-              setOperationMessage(t('editor.syncing', { name: onlineEditor.file.name }));
+              setEditorOperationMessage(t('editor.syncing', { name: onlineEditor.file.name }));
               try {
                 await beginTransfer(operationId, [hostId]);
                 await uploadContent(hostId, onlineEditor.file.fullPath, content, operationId);
                 const syncTime = new Date().toLocaleTimeString([], { hour12: false });
-                setOperationMessage(
-                  t('editor.synced', { name: onlineEditor.file.name, time: syncTime }),
-                );
+                if (onlineEditorGenerationRef.current === editorGeneration) {
+                  setEditorOperationMessage(
+                    t('editor.synced', { name: onlineEditor.file.name, time: syncTime }),
+                  );
+                }
                 await refresh(paneIndex, hostId);
                 return syncTime;
               } catch (error) {
-                setOperationMessage(
-                  t('editor.syncFailed', {
-                    name: onlineEditor.file.name,
-                    error: formatAppError(error),
-                  }),
-                  true,
-                );
+                if (onlineEditorGenerationRef.current === editorGeneration) {
+                  setEditorOperationMessage(
+                    t('editor.syncFailed', {
+                      name: onlineEditor.file.name,
+                      error: formatAppError(error),
+                    }),
+                    true,
+                  );
+                }
                 throw error;
               } finally {
                 await finishTransfer(operationId);
@@ -744,13 +871,26 @@ function BrowserPage({ paneIndex, hostId, connectedHosts, onHostChange }: Browse
 function WorkspaceLanding({ onOpen }: { onOpen: (hostId: string) => void }) {
   const { t } = useTranslation();
   const { hosts, selectedHostId, connectedHostIds } = useConnectionStore();
+  const isMobilePlatform =
+    typeof document !== 'undefined' &&
+    document.documentElement.classList.contains('mobile-platform');
   const selectedHost = hosts.find((host) => host.id === selectedHostId) ?? null;
   const isConnected = selectedHost ? connectedHostIds.includes(selectedHost.id) : false;
 
   return (
-    <div className="workspace-pane workspace-pane--empty">
+    <div
+      className={
+        selectedHost
+          ? 'workspace-pane workspace-pane--empty'
+          : 'workspace-pane workspace-pane--empty workspace-pane--welcome'
+      }
+    >
       <div className="pane-path-bar">
-        <span className="pane-index">{selectedHost?.name ?? t('browser.noHost')}</span>
+        {isMobilePlatform ? (
+          <span className="pane-index">{selectedHost?.name ?? t('browser.noHost')}</span>
+        ) : (
+          <PaneHostSelect hostId={selectedHostId ?? ''} onChange={onOpen} />
+        )}
         <Breadcrumb
           path="/"
           isEditing={false}
@@ -807,13 +947,6 @@ function GlobalStatusBar() {
     window.addEventListener('focus', refresh);
     return () => window.removeEventListener('focus', refresh);
   }, [refreshVaultStatus]);
-  useEffect(() => {
-    if (!vaultStatus?.refreshIntervalMs) return;
-    const timer = window.setInterval(() => {
-      void refreshVaultStatus();
-    }, vaultStatus.refreshIntervalMs);
-    return () => window.clearInterval(timer);
-  }, [refreshVaultStatus, vaultStatus?.refreshIntervalMs]);
   const transferList = Object.values(transfers);
   const pane = panes[activePane];
   const isPaneConnected = pane.hostId !== null && connectedHostIds.includes(pane.hostId);
@@ -963,11 +1096,42 @@ function isOperationCancelled(error: unknown): boolean {
   );
 }
 
+/** Android 应保留可编辑控件的原生选择、复制和剪切菜单。 */
+function isNativeTextContextTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    Boolean(target.closest('input, textarea, [contenteditable="true"], [role="textbox"]'))
+  );
+}
+
+/** 将触摸拖动提示放在触点左上方，避免被手指遮挡。 */
+function fileDragOverlayTransform(x: number, y: number): string {
+  if (!document.documentElement.classList.contains('mobile-platform')) {
+    return `translate3d(${x + 12}px, ${y + 12}px, 0)`;
+  }
+  return `translate3d(${x}px, ${y}px, 0) translate3d(calc(-100% - ${MOBILE_FILE_DRAG_GAP}px), calc(-100% - ${MOBILE_FILE_DRAG_GAP}px), 0)`;
+}
+
 function AppInner() {
   const { t } = useTranslation();
   const [paneHostIds, setPaneHostIds] = useState<[string | null, string | null]>([null, null]);
   const [isDualPane, setIsDualPane] = useState(false);
   const [isHostPanelVisible, setIsHostPanelVisible] = useState(true);
+  const [isMobileHostDrawerOpen, setIsMobileHostDrawerOpen] = useState(false);
+  const [isMobileHostDrawerDragging, setIsMobileHostDrawerDragging] = useState(false);
+  const [isMobileHostDrawerSettling, setIsMobileHostDrawerSettling] = useState(false);
+  const mobileHostDrawerRef = useRef<HTMLDivElement>(null);
+  const mobileHostDrawerProgressRef = useRef(0);
+  const mobileHostDrawerFrameRef = useRef<number | null>(null);
+  const mobileHostDrawerSettleTimerRef = useRef<number | null>(null);
+  const mobileDrawerGestureRef = useRef<{
+    startX: number;
+    startY: number;
+    width: number;
+    initiallyOpen: boolean;
+    horizontal: boolean;
+  } | null>(null);
+  const mobileDrawerGestureConsumedRef = useRef(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeDrag, setActiveDrag] = useState<FileDragData | null>(null);
   const dragOverlayRef = useRef<HTMLDivElement>(null);
@@ -978,6 +1142,7 @@ function AppInner() {
     files: RemoteFile[];
   } | null>(null);
   const [backgroundImageSource, setBackgroundImageSource] = useState<string | null>(null);
+  const vaultStatus = useVaultSyncStore((state) => state.status);
   const {
     hosts,
     connectedHostIds,
@@ -997,9 +1162,75 @@ function AppInner() {
     transferFiles,
   } = useBrowserStore();
   const dragSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(PlatformPointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 320, tolerance: 8 } }),
   );
+
+  const reconcileVaultState = useCallback(async () => {
+    await flushSettingsWrites();
+    if (useVaultSyncStore.getState().status?.enabled === false) return;
+    try {
+      const nextStatus = await syncVaultNow();
+      useVaultSyncStore.getState().setStatus(nextStatus);
+      await Promise.all([
+        useSettingsStore.getState().hydrateSettings(),
+        useConnectionStore.getState().refreshHosts(),
+      ]);
+    } catch {
+      await useVaultSyncStore.getState().refreshStatus();
+    }
+  }, []);
+
+  const handleSettingsClose = useCallback(() => {
+    setIsSettingsOpen(false);
+    void reconcileVaultState();
+  }, [reconcileVaultState]);
+
+  useEffect(() => {
+    if (isSettingsOpen || !vaultStatus?.enabled || !vaultStatus.refreshIntervalMs) return;
+    const timer = window.setInterval(() => {
+      void reconcileVaultState();
+    }, vaultStatus.refreshIntervalMs);
+    return () => window.clearInterval(timer);
+  }, [isSettingsOpen, reconcileVaultState, vaultStatus?.enabled, vaultStatus?.refreshIntervalMs]);
+
+  useEffect(() => {
+    const syncBeforeBackground = () => {
+      if (document.visibilityState === 'hidden') void reconcileVaultState();
+    };
+    document.addEventListener('visibilitychange', syncBeforeBackground);
+    return () => document.removeEventListener('visibilitychange', syncBeforeBackground);
+  }, [reconcileVaultState]);
   const dragCollisionDetection = useCallback<CollisionDetection>((args) => {
+    if (document.documentElement.classList.contains('mobile-platform') && args.pointerCoordinates) {
+      const previewRect = mobileFileDragRect(
+        args.pointerCoordinates,
+        dragOverlayRef.current?.offsetWidth ?? 0,
+        dragOverlayRef.current?.offsetHeight ?? 0,
+      );
+      const collisions = rectIntersection({
+        ...args,
+        collisionRect: previewRect,
+      });
+      const paneCollision = collisions.find(
+        (collision) => collision.data?.droppableContainer.data.current?.kind === 'pane',
+      );
+      if (!paneCollision) return [];
+      const paneData = paneCollision.data?.droppableContainer.data.current as
+        FileDropData | undefined;
+      if (paneData?.kind !== 'pane') return [];
+      const directoryCollision = collisions.find((collision) => {
+        const data = collision.data?.droppableContainer.data.current as FileDropData | undefined;
+        const directoryRect = args.droppableRects.get(collision.id);
+        return (
+          data?.kind === 'directory' &&
+          data.paneIndex === paneData.paneIndex &&
+          directoryRect !== undefined &&
+          rectangleOverlapRatio(previewRect, directoryRect) > MOBILE_DIRECTORY_OVERLAP_THRESHOLD
+        );
+      });
+      return directoryCollision ? [directoryCollision, paneCollision] : [paneCollision];
+    }
     return pointerWithin(args).sort((left, right) => {
       const rank = (id: string | number) => {
         const value = String(id);
@@ -1039,20 +1270,33 @@ function AppInner() {
     const data = event.active.data.current as FileDragData | undefined;
     setActiveDrag(data?.kind === 'file' ? data : null);
     const activator = event.activatorEvent;
+    const touch = activator instanceof TouchEvent ? activator.touches[0] : null;
     const origin =
-      activator instanceof MouseEvent ? { x: activator.clientX, y: activator.clientY } : null;
+      activator instanceof MouseEvent
+        ? { x: activator.clientX, y: activator.clientY }
+        : touch
+          ? { x: touch.clientX, y: touch.clientY }
+          : null;
     setDragPointer(origin);
   }, []);
 
   useEffect(() => {
     if (!activeDrag) return;
-    const updateDragPointer = (event: PointerEvent) => {
+    const updateDragPointer = (event: PointerEvent | TouchEvent) => {
       const overlay = dragOverlayRef.current;
       if (!overlay) return;
-      overlay.style.transform = `translate3d(${event.clientX + 12}px, ${event.clientY + 12}px, 0)`;
+      const touch = event instanceof TouchEvent ? event.touches[0] : null;
+      const x = touch?.clientX ?? (event instanceof PointerEvent ? event.clientX : null);
+      const y = touch?.clientY ?? (event instanceof PointerEvent ? event.clientY : null);
+      if (x === null || y === null) return;
+      overlay.style.transform = fileDragOverlayTransform(x, y);
     };
     window.addEventListener('pointermove', updateDragPointer, true);
-    return () => window.removeEventListener('pointermove', updateDragPointer, true);
+    window.addEventListener('touchmove', updateDragPointer, true);
+    return () => {
+      window.removeEventListener('pointermove', updateDragPointer, true);
+      window.removeEventListener('touchmove', updateDragPointer, true);
+    };
   }, [activeDrag]);
 
   const clearActiveDrag = useCallback(() => {
@@ -1069,14 +1313,12 @@ function AppInner() {
       const effectiveTarget: DirectoryDropData | null =
         target.kind === 'directory'
           ? target
-          : source.hostId !== target.hostId
-            ? {
-                kind: 'directory',
-                paneIndex: target.paneIndex,
-                hostId: target.hostId,
-                targetDirectory: useBrowserStore.getState().panes[target.paneIndex].currentPath,
-              }
-            : null;
+          : {
+              kind: 'directory',
+              paneIndex: target.paneIndex,
+              hostId: target.hostId,
+              targetDirectory: target.targetDirectory,
+            };
       if (!effectiveTarget) return;
       const sourcePane = useBrowserStore.getState().panes[source.paneIndex];
       const files = sourcePane.selectedFiles.some(
@@ -1094,7 +1336,6 @@ function AppInner() {
               effectiveTarget.targetDirectory.startsWith(`${file.fullPath}${targetSeparator}`)),
         );
       if (targetsSourceOrDescendant) {
-        setOperationMessage(t('browser.invalidMove'), true);
         return;
       }
       if (
@@ -1105,7 +1346,7 @@ function AppInner() {
       }
       setPendingDrop({ source, target: effectiveTarget, files });
     },
-    [clearActiveDrag, setOperationMessage, t],
+    [clearActiveDrag],
   );
 
   const confirmDrop = useCallback(() => {
@@ -1145,10 +1386,10 @@ function AppInner() {
     labelFontSize,
     captionFontSize,
     dataFontSize,
+    mobileTitlebarHeight,
     language,
     windowTopmost,
     setTheme,
-    hydrateSettings,
     setWindowTopmost,
   } = useSettingsStore();
 
@@ -1165,10 +1406,15 @@ function AppInner() {
   );
 
   useEffect(() => {
-    void hydrateSettings();
-  }, [hydrateSettings]);
-  useEffect(() => {
-    const preventNativeContextMenu = (event: MouseEvent) => event.preventDefault();
+    const preventNativeContextMenu = (event: MouseEvent) => {
+      if (
+        document.documentElement.classList.contains('mobile-platform') &&
+        isNativeTextContextTarget(event.target)
+      ) {
+        return;
+      }
+      event.preventDefault();
+    };
     document.addEventListener('contextmenu', preventNativeContextMenu, true);
     return () => document.removeEventListener('contextmenu', preventNativeContextMenu, true);
   }, []);
@@ -1213,6 +1459,24 @@ function AppInner() {
       setBackgroundImageSource(backgroundImage);
       return () => {
         active = false;
+      };
+    }
+    if (document.documentElement.classList.contains('mobile-platform')) {
+      let objectUrl: string | null = null;
+      void loadBackgroundImageBytes(backgroundImage)
+        .then((bytes) => {
+          if (!active) return;
+          objectUrl = URL.createObjectURL(
+            new Blob([bytes], { type: backgroundImageMimeType(backgroundImage) }),
+          );
+          setBackgroundImageSource(objectUrl);
+        })
+        .catch(() => {
+          if (active) setBackgroundImageSource(null);
+        });
+      return () => {
+        active = false;
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
       };
     }
     void loadBackgroundImage(backgroundImage)
@@ -1458,14 +1722,193 @@ function AppInner() {
     });
   }, []);
 
-  const connectedHosts = hosts.filter((host) => connectedHostIds.includes(host.id));
   const activeHostId = paneHostIds[activePane];
   const currentHost = activeHostId
     ? (hosts.find((host) => host.id === activeHostId) ?? null)
     : null;
 
+  const resetMobileHostDrawerPaint = useCallback(() => {
+    if (mobileHostDrawerFrameRef.current !== null) {
+      window.cancelAnimationFrame(mobileHostDrawerFrameRef.current);
+      mobileHostDrawerFrameRef.current = null;
+    }
+    mobileHostDrawerRef.current?.style.removeProperty('--mobile-host-drawer-translate');
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (mobileHostDrawerSettleTimerRef.current !== null) {
+        window.clearTimeout(mobileHostDrawerSettleTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const paintMobileHostDrawerProgress = useCallback((progress: number) => {
+    mobileHostDrawerProgressRef.current = progress;
+    if (mobileHostDrawerFrameRef.current !== null) return;
+    mobileHostDrawerFrameRef.current = window.requestAnimationFrame(() => {
+      mobileHostDrawerFrameRef.current = null;
+      const workspace = mobileHostDrawerRef.current;
+      if (!workspace) return;
+      const nextProgress = mobileHostDrawerProgressRef.current;
+      workspace.style.setProperty(
+        '--mobile-host-drawer-translate',
+        mobileDrawerTranslate(nextProgress),
+      );
+    });
+  }, []);
+
+  const finishMobileHostDrawerDrag = useCallback(
+    (open: boolean) => {
+      if (mobileHostDrawerFrameRef.current !== null) {
+        window.cancelAnimationFrame(mobileHostDrawerFrameRef.current);
+        mobileHostDrawerFrameRef.current = null;
+      }
+      if (mobileHostDrawerSettleTimerRef.current !== null) {
+        window.clearTimeout(mobileHostDrawerSettleTimerRef.current);
+      }
+      const workspace = mobileHostDrawerRef.current;
+      const currentProgress = mobileHostDrawerProgressRef.current;
+      workspace?.style.setProperty(
+        '--mobile-host-drawer-translate',
+        mobileDrawerTranslate(currentProgress),
+      );
+      setIsMobileHostDrawerOpen(open);
+      setIsMobileHostDrawerSettling(true);
+      window.requestAnimationFrame(() => {
+        const targetProgress = open ? 1 : 0;
+        mobileHostDrawerProgressRef.current = targetProgress;
+        workspace?.style.setProperty(
+          '--mobile-host-drawer-translate',
+          mobileDrawerTranslate(targetProgress),
+        );
+        mobileHostDrawerSettleTimerRef.current = window.setTimeout(() => {
+          mobileHostDrawerSettleTimerRef.current = null;
+          setIsMobileHostDrawerDragging(false);
+          setIsMobileHostDrawerSettling(false);
+          resetMobileHostDrawerPaint();
+        }, 300);
+      });
+    },
+    [resetMobileHostDrawerPaint],
+  );
+
+  const closeMobileHostDrawer = useCallback(() => {
+    if (mobileHostDrawerSettleTimerRef.current !== null) {
+      window.clearTimeout(mobileHostDrawerSettleTimerRef.current);
+      mobileHostDrawerSettleTimerRef.current = null;
+    }
+    setIsMobileHostDrawerDragging(false);
+    setIsMobileHostDrawerSettling(false);
+    setIsMobileHostDrawerOpen(false);
+    resetMobileHostDrawerPaint();
+  }, [resetMobileHostDrawerPaint]);
+
+  const handleGlobalDrawerTouchStart = useCallback(
+    (event: React.TouchEvent<HTMLElement>) => {
+      mobileDrawerGestureRef.current = null;
+      mobileDrawerGestureConsumedRef.current = false;
+      const target = event.target;
+      if (
+        activeDrag ||
+        isMobileHostDrawerSettling ||
+        hasActiveAppOverlay() ||
+        !document.documentElement.classList.contains('mobile-platform') ||
+        event.touches.length !== 1 ||
+        isNativeTextContextTarget(target) ||
+        (target instanceof Element && target.closest('[data-drawer-gesture="exclude"]'))
+      ) {
+        return;
+      }
+      const touch = event.touches[0];
+      mobileDrawerGestureRef.current = {
+        startX: touch.clientX,
+        startY: touch.clientY,
+        width: Math.max(1, window.innerWidth),
+        initiallyOpen: isMobileHostDrawerOpen,
+        horizontal: false,
+      };
+      mobileHostDrawerProgressRef.current = isMobileHostDrawerOpen ? 1 : 0;
+    },
+    [activeDrag, isMobileHostDrawerOpen, isMobileHostDrawerSettling],
+  );
+
+  const handleGlobalDrawerTouchMove = useCallback(
+    (event: React.TouchEvent<HTMLElement>) => {
+      const gesture = mobileDrawerGestureRef.current;
+      const touch = event.touches[0];
+      if (!gesture || !touch) return;
+      if (activeDrag || hasActiveAppOverlay()) {
+        mobileDrawerGestureRef.current = null;
+        if (gesture.horizontal) finishMobileHostDrawerDrag(gesture.initiallyOpen);
+        return;
+      }
+      const deltaX = touch.clientX - gesture.startX;
+      const deltaY = touch.clientY - gesture.startY;
+      if (!gesture.horizontal) {
+        if (Math.abs(deltaX) < 8 && Math.abs(deltaY) < 8) return;
+        if (Math.abs(deltaY) >= Math.abs(deltaX)) {
+          mobileDrawerGestureRef.current = null;
+          return;
+        }
+        gesture.horizontal = true;
+        setIsMobileHostDrawerDragging(true);
+      }
+      event.preventDefault();
+      paintMobileHostDrawerProgress(
+        mobileDrawerDragProgress(
+          gesture.startX,
+          touch.clientX,
+          gesture.width,
+          gesture.initiallyOpen,
+        ),
+      );
+    },
+    [activeDrag, finishMobileHostDrawerDrag, paintMobileHostDrawerProgress],
+  );
+
+  const handleGlobalDrawerTouchEnd = useCallback(
+    (event: React.TouchEvent<HTMLElement>) => {
+      const gesture = mobileDrawerGestureRef.current;
+      mobileDrawerGestureRef.current = null;
+      const touch = event.changedTouches[0];
+      if (!gesture || !touch || !gesture.horizontal || hasActiveAppOverlay()) {
+        if (gesture?.horizontal) finishMobileHostDrawerDrag(gesture.initiallyOpen);
+        return;
+      }
+      const deltaX = touch.clientX - gesture.startX;
+      const progress = mobileDrawerDragProgress(
+        gesture.startX,
+        touch.clientX,
+        gesture.width,
+        gesture.initiallyOpen,
+      );
+      paintMobileHostDrawerProgress(progress);
+      mobileDrawerGestureConsumedRef.current = true;
+      window.setTimeout(() => {
+        mobileDrawerGestureConsumedRef.current = false;
+      }, 500);
+      finishMobileHostDrawerDrag(settleMobileDrawer(progress, deltaX));
+    },
+    [finishMobileHostDrawerDrag, paintMobileHostDrawerProgress],
+  );
+
+  const handleGlobalDrawerTouchCancel = useCallback(() => {
+    const gesture = mobileDrawerGestureRef.current;
+    mobileDrawerGestureRef.current = null;
+    if (gesture?.horizontal) finishMobileHostDrawerDrag(gesture.initiallyOpen);
+  }, [finishMobileHostDrawerDrag]);
+
+  const handleGlobalDrawerClickCapture = useCallback((event: React.MouseEvent<HTMLElement>) => {
+    if (!mobileDrawerGestureConsumedRef.current) return;
+    mobileDrawerGestureConsumedRef.current = false;
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
   const appStyle = {
-    ...(backgroundImageSource
+    ...(backgroundImageEnabled && backgroundImageSource
       ? {
           '--app-background-image': `url(${JSON.stringify(backgroundImageSource)})`,
         }
@@ -1476,6 +1919,7 @@ function AppInner() {
     '--type-label-size': `${labelFontSize}px`,
     '--type-caption-size': `${captionFontSize}px`,
     '--type-data-size': `${dataFontSize}px`,
+    '--mobile-titlebar-content-height': `${mobileTitlebarHeight}px`,
     '--app-background-opacity': backgroundOpacity,
     '--glass-blur': `${glassBlur}px`,
     '--glass-opacity': glassOpacity,
@@ -1487,8 +1931,13 @@ function AppInner() {
       className="app-shell"
       data-theme={theme}
       data-accent={accentColor}
-      data-has-background={Boolean(backgroundImageEnabled && backgroundImage)}
+      data-has-background={Boolean(backgroundImageEnabled && backgroundImageSource)}
       style={appStyle}
+      onTouchStart={handleGlobalDrawerTouchStart}
+      onTouchMove={handleGlobalDrawerTouchMove}
+      onTouchEnd={handleGlobalDrawerTouchEnd}
+      onTouchCancel={handleGlobalDrawerTouchCancel}
+      onClickCapture={handleGlobalDrawerClickCapture}
     >
       <AppTitleBar
         currentHost={currentHost}
@@ -1497,6 +1946,7 @@ function AppInner() {
         isHostPanelVisible={isHostPanelVisible}
         isTopmost={windowTopmost}
         isRefreshing={panes[activePane].isLoading}
+        vaultStatus={vaultStatus}
         onBack={() => setPaneHost(activePane, null)}
         onRefresh={() => {
           if (activeHostId) void refresh(activePane, activeHostId);
@@ -1509,13 +1959,29 @@ function AppInner() {
       />
       <div className="page-stage">
         <div
+          ref={mobileHostDrawerRef}
           className={cn(
             'glass-workspace',
             paneHostIds[0] && 'glass-workspace--browsing',
             !isHostPanelVisible && 'glass-workspace--host-hidden',
+            isMobileHostDrawerOpen && 'glass-workspace--mobile-drawer-open',
+            isMobileHostDrawerDragging && 'glass-workspace--mobile-drawer-dragging',
+            isMobileHostDrawerSettling && 'glass-workspace--mobile-drawer-settling',
           )}
         >
-          <HostList onSelectHost={assignHostToPane} />
+          <HostList
+            onSelectHost={(hostId) => {
+              assignHostToPane(hostId);
+              closeMobileHostDrawer();
+            }}
+          />
+          <button
+            className="mobile-host-drawer-scrim"
+            type="button"
+            aria-label={t('titlebar.hideHosts')}
+            tabIndex={isMobileHostDrawerOpen ? 0 : -1}
+            onClick={closeMobileHostDrawer}
+          />
           <DndContext
             sensors={dragSensors}
             autoScroll={false}
@@ -1533,7 +1999,6 @@ function AppInner() {
                 <BrowserPage
                   paneIndex={0}
                   hostId={paneHostIds[0]}
-                  connectedHosts={connectedHosts}
                   onHostChange={(hostId) => setPaneHost(0, hostId)}
                 />
               ) : (
@@ -1544,7 +2009,6 @@ function AppInner() {
                   <BrowserPage
                     paneIndex={1}
                     hostId={paneHostIds[1]}
-                    connectedHosts={connectedHosts}
                     onHostChange={(hostId) => setPaneHost(1, hostId)}
                   />
                 ) : (
@@ -1558,7 +2022,7 @@ function AppInner() {
                 ref={dragOverlayRef}
                 className="file-drag-overlay"
                 style={{
-                  transform: `translate3d(${dragPointer.x + 12}px, ${dragPointer.y + 12}px, 0)`,
+                  transform: fileDragOverlayTransform(dragPointer.x, dragPointer.y),
                 }}
               >
                 {panes[activeDrag.paneIndex].selectedFiles.length > 1
@@ -1572,11 +2036,7 @@ function AppInner() {
         </div>
       </div>
       <GlobalStatusBar />
-      {isSettingsOpen && (
-        <Suspense fallback={null}>
-          <SettingsDialog onClose={() => setIsSettingsOpen(false)} />
-        </Suspense>
-      )}
+      {isSettingsOpen && <SettingsDialog onClose={handleSettingsClose} />}
       {pendingDrop && (
         <ConfirmDialog
           title={t(

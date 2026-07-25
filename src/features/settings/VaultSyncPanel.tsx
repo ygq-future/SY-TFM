@@ -22,6 +22,7 @@ import {
 import { hasAppErrorCode } from '../../lib/errors';
 import { useVaultSyncStore } from '../../stores/vaultSyncStore';
 import { ConfirmDialog } from '../../components/shared/Dialog';
+import { mergeVaultCredentialStatus, type VaultCredentialDraft } from './vaultCredentialDraft';
 
 /** WebDAV 跨设备加密保险库设置卡片。 */
 export function VaultSyncPanel({
@@ -37,9 +38,13 @@ export function VaultSyncPanel({
 }) {
   const { t } = useTranslation();
   const { status, setStatus, refreshStatus } = useVaultSyncStore();
-  const [webdavUrl, setWebdavUrl] = useState('');
-  const [username, setUsername] = useState('');
-  const [webdavPassword, setWebdavPassword] = useState('');
+  const [credentialDraft, setCredentialDraft] = useState<VaultCredentialDraft>(() => ({
+    webdavUrl: status?.webdavUrl ?? '',
+    username: status?.username ?? '',
+    password: '',
+    webdavUrlEdited: false,
+    usernameEdited: false,
+  }));
   const [busy, setBusy] = useState(false);
   const [isCloudOverwritePending, setIsCloudOverwritePending] = useState(false);
 
@@ -49,13 +54,16 @@ export function VaultSyncPanel({
 
   useEffect(() => {
     if (!status) return;
-    setWebdavUrl(status.webdavUrl);
-    setUsername(status.username);
+    setCredentialDraft((draft) => mergeVaultCredentialStatus(draft, status));
   }, [status]);
 
-  const credentials = { webdavUrl, username, password: webdavPassword };
+  const credentials = {
+    webdavUrl: credentialDraft.webdavUrl,
+    username: credentialDraft.username,
+    password: credentialDraft.password,
+  };
   const clearSecrets = () => {
-    setWebdavPassword('');
+    setCredentialDraft((draft) => ({ ...draft, password: '' }));
     onSecretsSaved();
   };
 
@@ -101,15 +109,15 @@ export function VaultSyncPanel({
   };
 
   const validateCredentials = (): boolean => {
-    if (!webdavUrl.trim()) {
+    if (!credentialDraft.webdavUrl.trim()) {
       toast.error(t('settings.storage.vaultRequiredWebDavUrl'));
       return false;
     }
-    if (!username.trim()) {
+    if (!credentialDraft.username.trim()) {
       toast.error(t('settings.storage.vaultRequiredUsername'));
       return false;
     }
-    if (!webdavPassword && !status?.passwordSaved) {
+    if (!credentialDraft.password && !status?.passwordSaved) {
       toast.error(t('settings.storage.vaultRequiredWebDavPassword'));
       return false;
     }
@@ -201,6 +209,7 @@ export function VaultSyncPanel({
     try {
       const next = await syncVaultNow(backupPassword || undefined);
       setStatus(next);
+      await onRestored();
       onSecretsSaved();
       toast.success(t('settings.storage.vaultSynced'));
     } catch (error) {
@@ -281,31 +290,59 @@ export function VaultSyncPanel({
             </div>
           </>
         ) : (
-          <>
+          <form
+            className="vault-credentials-form"
+            autoComplete="on"
+            onSubmit={(event) => event.preventDefault()}
+          >
             <div className="vault-form-grid">
               <label className="vault-field vault-field--wide">
                 <span>{t('settings.storage.vaultWebDavUrl')}</span>
                 <input
-                  value={webdavUrl}
-                  onChange={(event) => setWebdavUrl(event.target.value)}
+                  id="vault-webdav-url"
+                  name="url"
+                  autoComplete="url"
+                  value={credentialDraft.webdavUrl}
+                  onChange={(event) =>
+                    setCredentialDraft((draft) => ({
+                      ...draft,
+                      webdavUrl: event.target.value,
+                      webdavUrlEdited: true,
+                    }))
+                  }
                   placeholder="https://cloud.example.com/dav"
                 />
               </label>
               <label className="vault-field">
                 <span>{t('settings.storage.vaultUsername')}</span>
                 <input
-                  value={username}
+                  id="vault-webdav-username"
+                  name="username"
+                  value={credentialDraft.username}
                   autoComplete="username"
-                  onChange={(event) => setUsername(event.target.value)}
+                  onChange={(event) =>
+                    setCredentialDraft((draft) => ({
+                      ...draft,
+                      username: event.target.value,
+                      usernameEdited: true,
+                    }))
+                  }
                 />
               </label>
               <label className="vault-field">
                 <span>{t('settings.storage.vaultWebDavPassword')}</span>
                 <input
+                  id="vault-webdav-password"
+                  name="password"
                   type="password"
                   autoComplete="current-password"
-                  value={webdavPassword}
-                  onChange={(event) => setWebdavPassword(event.target.value)}
+                  value={credentialDraft.password}
+                  onChange={(event) =>
+                    setCredentialDraft((draft) => ({
+                      ...draft,
+                      password: event.target.value,
+                    }))
+                  }
                   placeholder={
                     status?.passwordSaved ? t('settings.storage.vaultSecretSaved') : undefined
                   }
@@ -349,7 +386,7 @@ export function VaultSyncPanel({
                 {t('settings.storage.vaultRestore')}
               </button>
             </div>
-          </>
+          </form>
         )}
       </div>
       {isCloudOverwritePending && (

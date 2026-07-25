@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
   Columns2,
+  Cloud,
   Maximize2,
   Minimize2,
   Minus,
@@ -20,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { RemoteHost } from '../../types/generated/RemoteHost';
+import type { VaultSyncStatus } from '../../types/generated/VaultSyncStatus';
 import type { AppearanceTheme } from '../../stores/settingsStore';
 
 interface AppTitleBarProps {
@@ -29,6 +31,7 @@ interface AppTitleBarProps {
   isHostPanelVisible: boolean;
   isTopmost: boolean;
   isRefreshing: boolean;
+  vaultStatus: VaultSyncStatus | null;
   onBack: () => void;
   onRefresh: () => void;
   onToggleTheme: () => void;
@@ -46,6 +49,7 @@ export function AppTitleBar({
   isHostPanelVisible,
   isTopmost,
   isRefreshing,
+  vaultStatus,
   onBack,
   onRefresh,
   onToggleTheme,
@@ -56,6 +60,18 @@ export function AppTitleBar({
 }: AppTitleBarProps) {
   const { t } = useTranslation();
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
+  const vaultStatusLabel = vaultStatus?.configured
+    ? t(
+        vaultStatus.enabled
+          ? 'settings.storage.vaultStatusActive'
+          : vaultStatus.vaultInitialized
+            ? 'settings.storage.vaultStatusPaused'
+            : 'settings.storage.vaultStatusSaved',
+      )
+    : null;
+  const vaultSyncTime = vaultStatus?.lastSyncedAt
+    ? new Date(vaultStatus.lastSyncedAt).toLocaleString()
+    : t('settings.storage.vaultNever');
 
   useEffect(() => {
     let disposed = false;
@@ -141,6 +157,7 @@ export function AppTitleBar({
           {isHostPanelVisible ? <PanelLeftClose /> : <PanelLeftOpen />}
         </button>
         <button
+          className="titlebar-mobile-panels-button"
           type="button"
           title={t(isDualPane ? 'titlebar.singlePane' : 'titlebar.dualPane')}
           onClick={onTogglePanels}
@@ -153,7 +170,29 @@ export function AppTitleBar({
         className="titlebar-drag-zone"
         onMouseDown={handleDragStart}
         onDoubleClick={toggleWindowMaximize}
-      />
+      >
+        {vaultStatus?.configured && vaultStatusLabel && (
+          <div
+            className="titlebar-mobile-vault"
+            aria-label={`${vaultStatusLabel}, ${vaultSyncTime}`}
+            title={`${vaultStatusLabel} · ${vaultSyncTime}`}
+          >
+            <Cloud aria-hidden="true" />
+            <span>
+              <strong>{vaultStatusLabel}</strong>
+              <time>{vaultSyncTime}</time>
+            </span>
+            <i
+              className={
+                vaultStatus.enabled
+                  ? 'titlebar-mobile-vault-indicator titlebar-mobile-vault-indicator--active'
+                  : 'titlebar-mobile-vault-indicator'
+              }
+              aria-hidden="true"
+            />
+          </div>
+        )}
+      </div>
 
       <div className="titlebar-appearance-group">
         <button

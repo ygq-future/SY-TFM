@@ -20,7 +20,14 @@ describe('host list ordering controls', () => {
     expect(source).toContain('restrictToVerticalAxis');
     expect(source).toContain('CSS.Transform.toString(transform)');
     expect(source).toContain('autoScroll={false}');
-    expect(source).not.toContain('DragOverlay');
+    expect(source).toContain('DragOverlay');
+    expect(source).toContain('mobileActiveHostDrag');
+    expect(source).toContain('event.active.rect.current.initial');
+    expect(source).toContain('adjustScale={false}');
+    expect(source).toContain('ModalPortal');
+    expect(source).toMatch(/<ModalPortal>\s*<DragOverlay/);
+    expect(source).toContain("classList.contains('mobile-platform')");
+    expect(source).toContain('host-drag-overlay');
     expect(source).not.toContain('dropIndicator');
     expect(css).toMatch(/\.host-sidebar-list\s*\{[^}]*overflow-x:\s*hidden/s);
     expect(css).toContain('.sidebar-host-row--actions-suppressed');
@@ -42,5 +49,46 @@ describe('host list ordering controls', () => {
     expect(source).not.toContain('sidebar-host-order-actions');
     expect(menu).not.toContain('onMoveUp');
     expect(menu).not.toContain('onMoveDown');
+  });
+
+  it('uses delayed touch sorting without opening Android context menus', () => {
+    expect(source).toContain('TouchSensor');
+    expect(source).toContain('useSensor(TouchSensor');
+    expect(source).toContain('useSensor(PlatformPointerSensor');
+    expect(source).toContain("classList.contains('mobile-platform')");
+    expect(css).toMatch(/html\.mobile-platform[\s\S]*?\.sidebar-host-actions[\s\S]*?opacity:\s*1/s);
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.host-filter-select \.select-value strong[^{]*\{[^}]*font-size:\s*14px/s,
+    );
+  });
+
+  it('uses labelled mobile actions without duplicating the global drawer gesture', () => {
+    expect(source).not.toContain('handleDrawerTouchMove');
+    expect(source).not.toContain('mobileDrawerDragProgress');
+    expect(source).not.toContain('onDrawerDragProgress');
+    expect(source).not.toContain('onDrawerDragEnd');
+    expect(source).toContain('sidebar-host-action-label');
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.sidebar-host-actions\s*\{[^}]*grid-template-columns:\s*repeat\(3,/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.sidebar-host-actions button\s*\{[^}]*min-height:\s*42px/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.host-sidebar-list\s*\{[^}]*padding-bottom:\s*max\(/s,
+    );
+  });
+
+  it('keeps the Windows host card cursor neutral', () => {
+    expect(css).toMatch(/\.sidebar-host-row\s*\{[^}]*cursor:\s*default/s);
+  });
+
+  it('applies the configured glass opacity and blur to the Android drawer only', () => {
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.host-sidebar,[\s\S]*?var\(--glass-opacity-percent\)[\s\S]*?backdrop-filter:\s*blur\(var\(--glass-blur\)\)/s,
+    );
+    const noBlurComment = css.indexOf('Android WebView scrolling should not continuously');
+    const noBlurRule = css.slice(noBlurComment, css.indexOf('\n  }\n}', noBlurComment));
+    expect(noBlurRule).not.toContain('.host-sidebar');
   });
 });

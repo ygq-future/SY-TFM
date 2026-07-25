@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronRight, HardDrive, MoreHorizontal } from 'lucide-react';
+import { ChevronRight, HardDrive, MoreHorizontal, Pencil } from 'lucide-react';
 import {
   buildBreadcrumbItems,
   collapseBreadcrumbItems,
@@ -166,6 +166,20 @@ export function Breadcrumb({
             </Fragment>
           ))}
         </>
+      )}
+      {!isEditing && (
+        <button
+          className="breadcrumb-edit-button"
+          type="button"
+          aria-label={t('browser.editPath')}
+          title={t('browser.editFullPath')}
+          onClick={(event) => {
+            event.stopPropagation();
+            onEditingChange(true);
+          }}
+        >
+          <Pencil />
+        </button>
       )}
     </nav>
   );

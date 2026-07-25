@@ -5,10 +5,12 @@ import { Pencil, Plug, Plus, Server, Trash2, Unplug } from 'lucide-react';
 import {
   closestCenter,
   DndContext,
-  PointerSensor,
+  DragOverlay,
+  TouchSensor,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
@@ -17,12 +19,13 @@ import { useConnectionStore } from '../../stores/connectionStore';
 import { cn } from '../../lib/utils';
 import { HostEditDialog } from './HostEditDialog';
 import { HostContextMenu } from './HostContextMenu';
-import { PasswordPromptDialog } from './PasswordPromptDialog';
 import { ConfirmDialog } from '../../components/shared/Dialog';
 import type { RemoteHost } from '../../types/generated/RemoteHost';
 import type { Protocol } from '../../types/enums/Protocol';
 import { Select } from '../../components/ui/Select';
-import { getHostKeyUnknownDetails, hasAppErrorCode } from '../../lib/errors';
+import { PlatformPointerSensor } from '../../lib/dragSensors';
+import { ModalPortal } from '../../components/shared/ModalPortal';
+import { useHostConnectionFlow } from './useHostConnectionFlow';
 
 /** 协议默认端口。 */
 function defaultPort(protocol: Protocol): number {
@@ -109,24 +112,14 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
     isReordering,
     loadHosts,
     selectHost,
-    connectHost,
     disconnectHost,
-    updateHost,
     deleteHost,
     reorderHosts,
   } = useConnectionStore();
 
   const [editingHost, setEditingHost] = useState<RemoteHost | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [passwordPromptHost, setPasswordPromptHost] = useState<RemoteHost | null>(null);
   const [pendingDeleteHost, setPendingDeleteHost] = useState<RemoteHost | null>(null);
-  const [pendingHostKey, setPendingHostKey] = useState<{
-    host: RemoteHost;
-    password?: string;
-    rememberPassword: boolean;
-    fingerprint: string;
-    endpoint: string;
-  } | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     host: RemoteHost;
     x: number;
@@ -135,8 +128,14 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
   const [tagFilter, setTagFilter] = useState('');
   const [suppressAllActions, setSuppressAllActions] = useState(false);
   const [suppressedActionsHostId, setSuppressedActionsHostId] = useState<string | null>(null);
+  const [mobileActiveHostDrag, setMobileActiveHostDrag] = useState<{
+    id: string;
+    width: number;
+    height: number;
+  } | null>(null);
   const hostSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(PlatformPointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 320, tolerance: 8 } }),
   );
 
   useEffect(() => {
@@ -182,52 +181,25 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
     setIsDialogOpen(true);
   };
 
-  const captureUnknownHostKey = (
-    host: RemoteHost,
-    password: string | undefined,
-    rememberPassword: boolean,
-    error: unknown,
-  ) => {
-    const details = getHostKeyUnknownDetails(error);
-    if (!details) return false;
-    useConnectionStore.setState({ error: null });
-    setPendingHostKey({
-      host,
-      password,
-      rememberPassword,
-      fingerprint: details.actualFingerprint,
-      endpoint: `${details.host}:${details.port}`,
-    });
-    return true;
-  };
-
-  const connectAndOpen = async (host: RemoteHost, password?: string, rememberPassword = false) => {
-    try {
-      await connectHost(host.id, password);
-      onSelectHost(host.id);
-    } catch (error) {
-      if (captureUnknownHostKey(host, password, rememberPassword, error)) return;
-      throw error;
-    }
-  };
-
-  const handleConnect = (host: RemoteHost) => {
-    if (!host.password) setPasswordPromptHost(host);
-    else {
-      void connectAndOpen(host).catch((error: unknown) => {
-        if (hasAppErrorCode(error, 'crypto_decrypt_failed')) {
-          useConnectionStore.setState({ error: null });
-          setPasswordPromptHost(host);
-        }
-      });
-    }
-  };
+  const { requestConnection: handleConnect, connectionDialogs } =
+    useHostConnectionFlow(onSelectHost);
   const handleHostDragEnd = (event: DragEndEvent) => {
+    setMobileActiveHostDrag(null);
     setSuppressAllActions(true);
     const targetId = event.over?.id;
     if (!targetId || event.active.id === targetId) return;
     void reorderHosts(String(event.active.id), String(targetId)).catch(() => undefined);
   };
+  const handleHostDragStart = (event: DragStartEvent) => {
+    if (!document.documentElement.classList.contains('mobile-platform')) return;
+    const initialRect = event.active.rect.current.initial;
+    setMobileActiveHostDrag({
+      id: String(event.active.id),
+      width: initialRect?.width ?? 0,
+      height: initialRect?.height ?? 0,
+    });
+  };
+  const mobileActiveHost = hosts.find((host) => host.id === mobileActiveHostDrag?.id) ?? null;
 
   return (
     <aside className="host-sidebar" aria-label={t('hosts.list')}>
@@ -260,7 +232,11 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
         autoScroll={false}
         collisionDetection={closestCenter}
         modifiers={[restrictToVerticalAxis]}
-        onDragCancel={() => setSuppressAllActions(false)}
+        onDragStart={handleHostDragStart}
+        onDragCancel={() => {
+          setMobileActiveHostDrag(null);
+          setSuppressAllActions(false);
+        }}
         onDragEnd={handleHostDragEnd}
       >
         <SortableContext
@@ -307,6 +283,7 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
                     }}
                     onContextMenu={(event) => {
                       event.preventDefault();
+                      if (document.documentElement.classList.contains('mobile-platform')) return;
                       selectHost(host.id);
                       setContextMenu({ host, x: event.clientX, y: event.clientY });
                     }}
@@ -336,6 +313,7 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
                         }}
                       >
                         <Pencil />
+                        <span className="sidebar-host-action-label">{t('common.edit')}</span>
                       </button>
                       {isConnected ? (
                         <button
@@ -348,6 +326,9 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
                           }}
                         >
                           <Unplug />
+                          <span className="sidebar-host-action-label">
+                            {t('common.disconnect')}
+                          </span>
                         </button>
                       ) : (
                         <button
@@ -360,6 +341,7 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
                           }}
                         >
                           <Plug />
+                          <span className="sidebar-host-action-label">{t('common.connect')}</span>
                         </button>
                       )}
                       <button
@@ -372,6 +354,7 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
                         }}
                       >
                         <Trash2 />
+                        <span className="sidebar-host-action-label">{t('common.delete')}</span>
                       </button>
                     </div>
                     <span
@@ -388,20 +371,33 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
             )}
           </div>
         </SortableContext>
+        {mobileActiveHostDrag && (
+          <ModalPortal>
+            <DragOverlay adjustScale={false} dropAnimation={null} zIndex={260}>
+              {mobileActiveHost && (
+                <div
+                  className="host-drag-overlay"
+                  style={{
+                    width: mobileActiveHostDrag.width || undefined,
+                    minHeight: mobileActiveHostDrag.height || undefined,
+                  }}
+                >
+                  <div className="sidebar-host-icon">
+                    <Server />
+                  </div>
+                  <div className="sidebar-host-copy">
+                    <strong>{mobileActiveHost.name}</strong>
+                    <span>{formatHostEndpoint(mobileActiveHost)}</span>
+                  </div>
+                </div>
+              )}
+            </DragOverlay>
+          </ModalPortal>
+        )}
       </DndContext>
 
       {isDialogOpen && <HostEditDialog host={editingHost} onClose={() => setIsDialogOpen(false)} />}
-      {passwordPromptHost && (
-        <PasswordPromptDialog
-          hostName={passwordPromptHost.name}
-          onConfirm={(password, remember) => {
-            const host = passwordPromptHost;
-            setPasswordPromptHost(null);
-            void connectAndOpen(host, password, remember).catch(() => undefined);
-          }}
-          onCancel={() => setPasswordPromptHost(null)}
-        />
-      )}
+      {connectionDialogs}
       {contextMenu && (
         <HostContextMenu
           host={contextMenu.host}
@@ -413,33 +409,6 @@ export function HostList({ onSelectHost }: { onSelectHost: (hostId: string) => v
           onConnect={() => handleConnect(contextMenu.host)}
           onDisconnect={() => void disconnectHost(contextMenu.host.id)}
           onDelete={() => setPendingDeleteHost(contextMenu.host)}
-        />
-      )}
-      {pendingHostKey && (
-        <ConfirmDialog
-          title={t('hostKey.trustTitle')}
-          message={
-            <div className="host-key-message">
-              <p>{t('hostKey.trustMessage', { endpoint: pendingHostKey.endpoint })}</p>
-              <code>{pendingHostKey.fingerprint}</code>
-            </div>
-          }
-          confirmLabel={t('hostKey.trust')}
-          onConfirm={() => {
-            const pending = pendingHostKey;
-            setPendingHostKey(null);
-            useConnectionStore.setState({ error: null });
-            void (async () => {
-              const trustedHost = {
-                ...pending.host,
-                password: pending.rememberPassword ? (pending.password ?? '') : '',
-                sftpHostKeyFingerprint: pending.fingerprint,
-              };
-              await updateHost(trustedHost);
-              await connectAndOpen(trustedHost, pending.password);
-            })().catch(() => undefined);
-          }}
-          onCancel={() => setPendingHostKey(null)}
         />
       )}
       {pendingDeleteHost && (

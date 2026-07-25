@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Check,
@@ -29,6 +29,7 @@ import {
   exportPortableVault,
   getAppInfo,
   getStoragePaths,
+  importBackgroundImage,
   importPortableVault,
   loadBackgroundImage,
   saveVaultBackupPassword,
@@ -43,6 +44,9 @@ import { useVaultSyncStore } from '../../stores/vaultSyncStore';
 import { reviewBackupPassword } from './backupPasswordReview';
 
 type SettingsSection = 'general' | 'appearance' | 'storage' | 'about';
+
+const MOBILE_RANGE_THUMB_HIT_RADIUS = 28;
+const MOBILE_RANGE_DIRECTION_THRESHOLD = 5;
 
 const SECTIONS: ReadonlyArray<{
   value: SettingsSection;
@@ -97,16 +101,87 @@ function RangeControl({
   unit: string;
   onChange: (value: number) => void;
 }) {
+  const mobileGestureRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    horizontal: boolean;
+  } | null>(null);
+
+  const updateFromPointer = (event: PointerEvent<HTMLDivElement>) => {
+    const rectangle = event.currentTarget.getBoundingClientRect();
+    if (rectangle.width <= 0) return;
+    const ratio = Math.min(1, Math.max(0, (event.clientX - rectangle.left) / rectangle.width));
+    const steps = Math.round((ratio * (max - min)) / step);
+    onChange(Math.min(max, Math.max(min, Number((min + steps * step).toFixed(5)))));
+  };
+
+  const handleMobilePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (
+      event.pointerType !== 'touch' ||
+      !document.documentElement.classList.contains('mobile-platform')
+    ) {
+      return;
+    }
+    const rectangle = event.currentTarget.getBoundingClientRect();
+    const progress = max === min ? 0 : (value - min) / (max - min);
+    const thumbCenter = rectangle.left + rectangle.width * progress;
+    if (Math.abs(event.clientX - thumbCenter) > MOBILE_RANGE_THUMB_HIT_RADIUS) return;
+    mobileGestureRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      horizontal: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handleMobilePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const gesture = mobileGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - gesture.startX;
+    const deltaY = event.clientY - gesture.startY;
+    if (!gesture.horizontal) {
+      if (
+        Math.abs(deltaY) >= Math.abs(deltaX) &&
+        Math.abs(deltaY) > MOBILE_RANGE_DIRECTION_THRESHOLD
+      ) {
+        mobileGestureRef.current = null;
+        return;
+      }
+      if (Math.abs(deltaX) <= MOBILE_RANGE_DIRECTION_THRESHOLD) return;
+      gesture.horizontal = true;
+    }
+    event.preventDefault();
+    updateFromPointer(event);
+  };
+
+  const clearMobilePointer = (event: PointerEvent<HTMLDivElement>) => {
+    if (mobileGestureRef.current?.pointerId === event.pointerId) {
+      mobileGestureRef.current = null;
+    }
+  };
+
   return (
     <div className="settings-range">
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-      />
+      <div className="settings-range-track">
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(event) => onChange(Number(event.target.value))}
+        />
+        <div
+          className="settings-range-touch-guard"
+          aria-hidden="true"
+          onPointerDown={handleMobilePointerDown}
+          onPointerMove={handleMobilePointerMove}
+          onPointerUp={clearMobilePointer}
+          onPointerCancel={clearMobilePointer}
+        />
+      </div>
       <output>
         {Math.round(value * (unit === '%' ? 100 : 1))}
         {unit}
@@ -133,6 +208,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [isSavingBackupPassword, setIsSavingBackupPassword] = useState(false);
   const [isBackupPasswordReviewPending, setIsBackupPasswordReviewPending] = useState(false);
   const backupPasswordReview = reviewBackupPassword(portablePassword);
+  const isAndroidPlatform = document.documentElement.classList.contains('mobile-platform');
 
   useEffect(() => {
     void getStoragePaths()
@@ -168,20 +244,36 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       await loadBackgroundImage(path);
       settings.setBackgroundImage(path);
       settings.setBackgroundImageEnabled(true);
-    } catch (error) {
-      toast.error(t('settings.appearance.backgroundFailed', { error: formatAppError(error) }));
+    } catch {
+      toast.error(t('settings.appearance.backgroundFailed'));
     }
+  };
+
+  const applyImportedAndroidBackground = (path: string) => {
+    settings.setBackgroundImage(path);
+    settings.setBackgroundImageEnabled(true);
   };
 
   const chooseBackground = async () => {
     const selected = await pickImageFile(
       t('settings.appearance.chooseImage'),
       t('settings.appearance.imageFilter'),
-      settings.backgroundImage ?? undefined,
+      isAndroidPlatform ? undefined : (settings.backgroundImage ?? undefined),
     );
     if (!selected) return;
-    setBackgroundPathDraft(selected);
-    await applyBackgroundPath(selected);
+    try {
+      const importedPath = selected.startsWith('content://')
+        ? await importBackgroundImage(selected)
+        : selected;
+      setBackgroundPathDraft(importedPath);
+      if (isAndroidPlatform) {
+        applyImportedAndroidBackground(importedPath);
+      } else {
+        await applyBackgroundPath(importedPath);
+      }
+    } catch {
+      toast.error(t('settings.appearance.backgroundFailed'));
+    }
   };
 
   const chooseDirectory = async (kind: 'download' | 'data') => {
@@ -340,6 +432,22 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                       onValueChange={settings.setLanguage}
                     />
                   </SettingRow>
+                  {isAndroidPlatform && (
+                    <SettingRow
+                      title={t('settings.general.mobileTitlebarHeight')}
+                      hint={t('settings.general.mobileTitlebarHeightHint')}
+                      icon={<SlidersHorizontal />}
+                    >
+                      <RangeControl
+                        value={settings.mobileTitlebarHeight}
+                        min={32}
+                        max={80}
+                        step={2}
+                        unit="px"
+                        onChange={settings.setMobileTitlebarHeight}
+                      />
+                    </SettingRow>
+                  )}
                   <SettingRow
                     title={t('settings.general.fontSize')}
                     hint={t('settings.general.fontSizeHint')}
@@ -491,9 +599,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     <div className="path-setting background-path-setting">
                       <input
                         value={backgroundPathDraft}
+                        readOnly={isAndroidPlatform}
                         placeholder={t('settings.appearance.backgroundPlaceholder')}
                         onChange={(event) => setBackgroundPathDraft(event.target.value)}
-                        onBlur={() => void applyBackgroundPath(backgroundPathDraft)}
+                        onBlur={() => {
+                          if (!isAndroidPlatform) void applyBackgroundPath(backgroundPathDraft);
+                        }}
                       />
                       <button
                         type="button"
@@ -630,10 +741,16 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     icon={<KeyRound />}
                     className="setting-row--backup-password"
                   >
-                    <div className="shared-backup-passwords">
+                    <form
+                      className="shared-backup-passwords"
+                      autoComplete="on"
+                      onSubmit={(event) => event.preventDefault()}
+                    >
                       <label className="vault-field backup-password-field">
                         <span>{t('settings.storage.vaultPasswordInput')}</span>
                         <input
+                          id="backup-password"
+                          name="new-password"
                           type="password"
                           autoComplete="new-password"
                           aria-label={t('settings.storage.vaultPasswordInput')}
@@ -645,6 +762,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                       <label className="vault-field backup-password-field">
                         <span>{t('settings.storage.vaultPasswordConfirm')}</span>
                         <input
+                          id="backup-password-confirm"
+                          name="new-password-confirmation"
                           type="password"
                           autoComplete="new-password"
                           aria-label={t('settings.storage.vaultPasswordConfirm')}
@@ -670,7 +789,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                           {t('settings.storage.backupPasswordSave')}
                         </button>
                       </div>
-                    </div>
+                    </form>
                   </SettingRow>
                   <div className="encrypted-backup-card">
                     <div>

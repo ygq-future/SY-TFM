@@ -340,7 +340,7 @@ export async function enableVaultSync(
   });
 }
 
-/** 立即上传新的保险库 revision。 */
+/** 立即双向核对云端保险库，只在本地范围确有变化时上传新的 revision。 */
 export async function syncVaultNow(backupPassword?: string): Promise<VaultSyncStatus> {
   return invoke<VaultSyncStatus>('sync_vault_now', {
     backupPassword: backupPassword || null,
@@ -395,9 +395,36 @@ export async function getStoragePaths(): Promise<StoragePaths> {
   return invoke<StoragePaths>('get_storage_paths');
 }
 
+/** 查询当前是否运行于 Tauri 移动平台。 */
+export async function isMobilePlatform(): Promise<boolean> {
+  return invoke<boolean>('is_mobile_platform');
+}
+
 /** 将本地背景图片安全读取为 WebView 可用的 Data URL。 */
 export async function loadBackgroundImage(filePath: string): Promise<string> {
   return invoke<string>('load_background_image', { filePath });
+}
+
+/** 以原始二进制读取背景图片，供 Android 创建短生命周期 Blob URL。 */
+export async function loadBackgroundImageBytes(filePath: string): Promise<ArrayBuffer> {
+  return invoke<ArrayBuffer>('load_background_image_bytes', { filePath });
+}
+
+/** 根据已验证的背景路径返回 Blob MIME；未知扩展名交给 WebView 内容嗅探。 */
+export function backgroundImageMimeType(filePath: string): string {
+  const extension = filePath.split('.').pop()?.toLowerCase();
+  if (extension === 'png') return 'image/png';
+  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
+  if (extension === 'webp') return 'image/webp';
+  if (extension === 'gif') return 'image/gif';
+  if (extension === 'bmp') return 'image/bmp';
+  if (extension === 'avif') return 'image/avif';
+  return '';
+}
+
+/** 将 Android Photo Picker 的临时 content URI 导入应用私有存储。 */
+export async function importBackgroundImage(filePath: string): Promise<string> {
+  return invoke<string>('import_background_image', { filePath });
 }
 
 /** 获取持久化的界面基础字号。 */

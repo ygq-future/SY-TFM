@@ -153,6 +153,19 @@ describe('browser store pane ownership', () => {
     expect(useBrowserStore.getState().operationIsError).toBe(false);
   });
 
+  it('only clears the operation notice owned by the closing editor', () => {
+    useBrowserStore.getState().setOperationMessage('Opened notes.txt in Online Edit');
+    useBrowserStore.getState().setOperationMessage('A newer transfer failed', true);
+
+    useBrowserStore.getState().clearOperationMessage('Opened notes.txt in Online Edit');
+    expect(useBrowserStore.getState().operationMessage).toBe('A newer transfer failed');
+    expect(useBrowserStore.getState().operationIsError).toBe(true);
+
+    useBrowserStore.getState().clearOperationMessage('A newer transfer failed');
+    expect(useBrowserStore.getState().operationMessage).toBe('');
+    expect(useBrowserStore.getState().operationIsError).toBe(false);
+  });
+
   it('clears cached directory data when its host disconnects', () => {
     useBrowserStore.setState((state) => ({
       panes: [

@@ -4,6 +4,7 @@ import type { RemoteHost } from '../types/generated/RemoteHost';
 import { useConnectionStore } from './connectionStore';
 
 vi.mock('../lib/tauri', () => ({
+  getHosts: vi.fn(),
   reorderHosts: vi.fn(),
 }));
 
@@ -44,5 +45,18 @@ describe('connection store host ordering', () => {
       'secret-c',
     ]);
     expect(tauri.reorderHosts).toHaveBeenCalledWith(['b', 'a', 'c']);
+  });
+
+  it('refreshes polled hosts without entering loading state or replacing unchanged data', async () => {
+    const hosts = [host('a', 'secret-a')];
+    useConnectionStore.setState({ hosts, isLoading: false });
+    (tauri.getHosts as MockedFunction<typeof tauri.getHosts>).mockResolvedValue(
+      structuredClone(hosts),
+    );
+
+    await useConnectionStore.getState().refreshHosts();
+
+    expect(useConnectionStore.getState().hosts).toBe(hosts);
+    expect(useConnectionStore.getState().isLoading).toBe(false);
   });
 });

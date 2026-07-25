@@ -235,6 +235,9 @@ export function HostEditDialog({
                 )}
                 <Field label={t('hostEditor.username')} className="field-username">
                   <input
+                    id="host-username"
+                    name="username"
+                    autoComplete="username"
                     className="field-control"
                     value={form.username}
                     onChange={(event) => updateForm({ username: event.target.value })}
@@ -245,7 +248,10 @@ export function HostEditDialog({
                   <div className="input-with-icon">
                     <KeyRound />
                     <input
+                      id="host-password"
+                      name="password"
                       type="password"
+                      autoComplete="current-password"
                       className="field-control"
                       value={form.password}
                       placeholder={t(

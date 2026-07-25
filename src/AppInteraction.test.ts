@@ -9,6 +9,21 @@ describe('app shell interaction wiring', () => {
     'utf8',
   );
 
+  it('isolates mobile UI behind the native platform signal', () => {
+    const main = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8');
+    const backend = readFileSync(
+      new URL('../src-tauri/src/commands/mod.rs', import.meta.url),
+      'utf8',
+    );
+    expect(main).toContain("classList.add('mobile-platform')");
+    expect(backend).toContain('cfg!(mobile)');
+    expect(css).toMatch(/\.titlebar-mobile-drawer-button[\s\S]*?display:\s*none/);
+    expect(css).toContain('html.mobile-platform');
+    expect(css).toContain('--mobile-safe-top: env(safe-area-inset-top, 0px)');
+    expect(css).toContain('.workspace-pane--welcome');
+    expect(css).toMatch(/html\.mobile-platform[\s\S]*?\.settings-layout\s*\{/);
+  });
+
   it('builds the host sidebar visibility classes as independent tokens', () => {
     expect(source).toMatch(/cn\(\s*'glass-workspace'/);
     expect(source).toContain("!isHostPanelVisible && 'glass-workspace--host-hidden'");
@@ -43,9 +58,27 @@ describe('app shell interaction wiring', () => {
     );
   });
 
-  it('disables the native webview context menu without blocking app menus', () => {
+  it('lets Android use every configured typography tier instead of platform overrides', () => {
+    expect(source).toContain("'--type-body-size': `${fontSize}px`");
+    expect(source).toContain("'--type-heading-size': `${headingFontSize}px`");
+    expect(source).toContain("'--type-label-size': `${labelFontSize}px`");
+    expect(source).toContain("'--type-caption-size': `${captionFontSize}px`");
+    expect(source).toContain("'--type-data-size': `${dataFontSize}px`");
+    expect(css).not.toMatch(
+      /html\.mobile-platform[\s\S]*?\.app-shell\s*\{[^}]*--(?:ui-font|type-(?:body|heading|label|caption|data))-size:/s,
+    );
+  });
+
+  it('keeps Android native text actions available inside editable controls', () => {
     expect(source).toContain(
       "document.addEventListener('contextmenu', preventNativeContextMenu, true)",
+    );
+    expect(source).toContain('isNativeTextContextTarget');
+    expect(source).toMatch(
+      /classList\.contains\('mobile-platform'\)[\s\S]*?isNativeTextContextTarget\(event\.target\)[\s\S]*?return/,
+    );
+    expect(source).toMatch(
+      /handleGlobalDrawerTouchStart[\s\S]*?isNativeTextContextTarget\(target\)/,
     );
   });
 
@@ -55,6 +88,15 @@ describe('app shell interaction wiring', () => {
     expect(source).toContain('event.clientY');
     expect(source).not.toContain('event.delta.x');
     expect(source).not.toContain('event.delta.y');
+    expect(source).toContain('fileDragOverlayTransform');
+    expect(source).toContain('MOBILE_FILE_DRAG_GAP');
+    expect(source).toContain("classList.contains('mobile-platform')");
+    expect(source).toContain('${x + 12}px');
+    expect(source).toContain('mobileFileDragRect');
+    expect(source).toContain('dragOverlayRef.current?.offsetWidth');
+    expect(source).toContain('dragOverlayRef.current?.offsetHeight');
+    expect(source).toContain('rectIntersection');
+    expect(source).toContain("collision.data?.droppableContainer.data.current?.kind === 'pane'");
   });
 
   it('keeps batch progress ownership in the initiating flow and shows count plus speed', () => {
@@ -89,10 +131,16 @@ describe('app shell interaction wiring', () => {
     expect(source).toContain("status === 'connecting' || status === 'reconnecting'");
   });
 
-  it('shows the current vault sync state and latest successful time in the status bar', () => {
+  it('shows vault sync metadata in the desktop status bar and Android titlebar', () => {
     expect(source).toContain('useVaultSyncStore');
     expect(source).toContain('vault-status-meta');
     expect(source).toContain('lastSyncedAt');
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.titlebar-mobile-vault\s*\{[^}]*display:\s*flex/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.status-meta\s*>\s*\.vault-status-meta\s*\{[^}]*display:\s*none/s,
+    );
   });
 
   it('hides file metadata after the active pane host disconnects', () => {
@@ -161,5 +209,239 @@ describe('app shell interaction wiring', () => {
     expect(source).toContain("setDialog({ type: 'deleteConfirm' })");
     expect(source).toContain("setDialog({ type: 'rename', file: selectedFiles[0] })");
     expect(source).toContain('[role="menu"]');
+  });
+
+  it('provides Android-specific path editing and delayed touch dragging', () => {
+    const breadcrumb = readFileSync(
+      new URL('./features/browser/Breadcrumb.tsx', import.meta.url),
+      'utf8',
+    );
+    const fileList = readFileSync(
+      new URL('./features/browser/FileList.tsx', import.meta.url),
+      'utf8',
+    );
+    const dragSensors = readFileSync(new URL('./lib/dragSensors.ts', import.meta.url), 'utf8');
+    expect(source).toContain('TouchSensor');
+    expect(source).toContain('useSensor(TouchSensor');
+    expect(source).toContain('useSensor(PlatformPointerSensor');
+    expect(dragSensors).toContain("event.pointerType === 'touch'");
+    expect(dragSensors).toContain("classList.contains('mobile-platform')");
+    expect(source).toMatch(
+      /className="icon-button path-edit-action"[\s\S]*?title=\{t\('browser\.editPath'\)\}/,
+    );
+    expect(breadcrumb).toContain('breadcrumb-edit-button');
+    expect(breadcrumb).toContain('onEditingChange(true)');
+    expect(fileList).toContain("classList.contains('mobile-platform')");
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.browser-toolbar\s*\{[^}]*grid-template-areas:[^}]*path[^}]*actions/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.breadcrumb\s*\{[^}]*border-radius:[^}]*overflow:\s*hidden/s,
+    );
+  });
+
+  it('keeps Android connection and item counts on the same status row', () => {
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.global-status-bar\s*\{[^}]*grid-template-areas:\s*'connection meta'/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.transfer-status:not\(\.transfer-status--visible\)\s*\{[^}]*display:\s*none/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.global-status-bar:has\(\.transfer-status--visible\)\s*\{[^}]*flex:\s*0\s+0\s+auto;[^}]*overflow:\s*hidden/s,
+    );
+  });
+
+  it('shows pane-aware Android drop feedback and keeps cross-host wording as copy', () => {
+    const fileList = readFileSync(
+      new URL('./features/browser/FileList.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(fileList).toContain("kind: 'pane'");
+    expect(fileList).toContain('file-list-drop-hint');
+    expect(fileList).toContain("'browser.copyInto'");
+    expect(fileList).toContain("'browser.copyToCurrent'");
+    expect(source).toMatch(
+      /rectangleOverlapRatio\(previewRect, directoryRect\)\s*>\s*MOBILE_DIRECTORY_OVERLAP_THRESHOLD/,
+    );
+    expect(fileList).toContain('isCurrentDirectoryDropTarget');
+    expect(fileList).toMatch(/kind:\s*'blocked'[\s\S]*?targetDirectory:\s*currentPath/);
+    expect(source).toMatch(/target\.kind === 'directory'\s*\? target\s*:\s*\{/);
+    expect(css).toMatch(/\.file-list--drop-target::before\s*\{[^}]*position:\s*absolute/s);
+    expect(css).toMatch(/\.file-list--drop-target::before\s*\{[^}]*backdrop-filter:\s*blur/s);
+    expect(css).toMatch(/\.file-list--drop-target::before\s*\{[^}]*border:\s*0/s);
+    expect(css).toMatch(/\.file-list-drop-hint\s*\{[^}]*position:\s*absolute/s);
+    expect(css).not.toMatch(/\.file-list--drop-target\s+\.file-scroll-area\s*\{[^}]*box-shadow:/s);
+  });
+
+  it('uses one Android panel surface instead of nesting a second bordered shell', () => {
+    expect(css).toMatch(/html\.mobile-platform[\s\S]*?\.browser-page\s*\{[^}]*gap:\s*0/s);
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.browser-page\s*\{[^}]*padding:\s*0;[^}]*overflow:\s*hidden/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.browser-toolbar\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*0/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.file-workspace\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*0/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.file-table-header\s*\{[^}]*border-radius:\s*0/s,
+    );
+  });
+
+  it('drives the Android host drawer with continuous progress and fully covers the workspace', () => {
+    expect(source).toContain('mobileHostDrawerProgressRef');
+    expect(source).toContain('mobileHostDrawerFrameRef');
+    expect(source).toContain('paintMobileHostDrawerProgress');
+    expect(source).toContain("'glass-workspace--mobile-drawer-dragging'");
+    expect(source).toContain("'glass-workspace--mobile-drawer-settling'");
+    expect(source).toContain('isMobileHostDrawerSettling');
+    expect(source).toContain("'--mobile-host-drawer-translate'");
+    expect(source).toContain('mobileDrawerTranslate(nextProgress)');
+    expect(source).not.toContain('setMobileHostDrawerProgress');
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.glass-workspace--mobile-drawer-dragging \.host-sidebar\s*\{[^}]*transform:\s*translate3d\(var\(--mobile-host-drawer-translate\),\s*0,\s*0\)/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.glass-workspace--mobile-drawer-settling \.host-sidebar\s*\{[^}]*transition:[^}]*transform\s+280ms/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.app-shell\s*\{[^}]*--mobile-workspace-inset-x:\s*8px;[^}]*--mobile-workspace-inset-y:\s*6px;[^}]*--mobile-workspace-radius:\s*14px/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.workspace-panels\s*\{[^}]*padding:\s*var\(--mobile-workspace-inset-y\)\s+var\(--mobile-workspace-inset-x\)/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.glass-workspace,[\s\S]*?--mobile-host-drawer-translate:[^}]*position:\s*relative/s,
+    );
+    expect(css).toContain(
+      '--mobile-host-drawer-translate: calc(-100% - var(--mobile-workspace-inset-x));',
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.host-sidebar,[\s\S]*?position:\s*absolute;[^}]*inset:\s*var\(--mobile-workspace-inset-y\)\s+var\(--mobile-workspace-inset-x\);[^}]*overflow:\s*hidden;[^}]*border-radius:\s*var\(--mobile-workspace-radius\)/s,
+    );
+    expect(source).toContain('handleGlobalDrawerTouchStart');
+    expect(source).toContain('handleGlobalDrawerTouchMove');
+    expect(source).toContain('onTouchStart={handleGlobalDrawerTouchStart}');
+    expect(source).toContain('onTouchMove={handleGlobalDrawerTouchMove}');
+    expect(source).toContain("classList.contains('mobile-platform')");
+    expect(source).not.toContain('onToggleMobileHostDrawer=');
+    expect(source).toContain('hasActiveAppOverlay()');
+    expect(source).toMatch(/hasActiveAppOverlay\(\)[\s\S]*?mobileDrawerGestureRef\.current = null/);
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.app-shell:has\(\.transfer-status--visible\)[^{]*\{[^}]*--mobile-statusbar-safe-height:\s*72px/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.mobile-host-drawer-scrim\s*\{[^}]*background:\s*transparent;[^}]*opacity:\s*1/s,
+    );
+  });
+
+  it('keeps the pane host connection controls desktop-only and exposes every saved host there', () => {
+    const paneHostSelect = readFileSync(
+      new URL('./features/browser/PaneHostSelect.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(paneHostSelect).toContain("classList.contains('mobile-platform')");
+    expect(paneHostSelect).toContain('const visibleHosts = isMobilePlatform');
+    expect(paneHostSelect).toContain("'common.connect'");
+    expect(paneHostSelect).toContain("'common.disconnect'");
+    expect(paneHostSelect).toContain('useHostConnectionFlow');
+    expect(source).toMatch(/function WorkspaceLanding[\s\S]*?<PaneHostSelect/);
+  });
+
+  it('uses a compact horizontal Android action strip', () => {
+    expect(source).toContain('data-drawer-gesture="exclude"');
+    expect(source).toContain('closest(\'[data-drawer-gesture="exclude"]\')');
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.mobile-file-actions\s*\{[^}]*touch-action:\s*pan-x/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.mobile-file-action\s*\{[^}]*min-height:\s*34px;[^}]*flex-direction:\s*row/s,
+    );
+  });
+
+  it('keeps the pane host menu compact while preserving desktop connection actions', () => {
+    const hostSelect = readFileSync(
+      new URL('./features/browser/PaneHostSelect.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(css).toMatch(/\.pane-host-menu,[\s\S]*?width:\s*196px/s);
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.pane-host-menu\s*\{[^}]*width:\s*min\(164px,\s*calc\(100vw - 16px\)\)/s,
+    );
+    expect(css).toMatch(
+      /\.pane-host-connection-action\s*\{[^}]*width:\s*30px[^}]*min-width:\s*30px/s,
+    );
+    expect(hostSelect).not.toMatch(
+      /<span>\{t\(isConnected \? 'common\.disconnect' : 'common\.connect'\)\}<\/span>/,
+    );
+  });
+
+  it('avoids full-screen backdrop blur on Android compositor surfaces', () => {
+    expect(css).toContain(
+      'Android WebView scrolling should not continuously re-rasterize full-screen blur layers.',
+    );
+    expect(css).toMatch(
+      /\.app-titlebar,[\s\S]*?\.workspace-pane,[\s\S]*?\.browser-page,[\s\S]*?\.global-status-bar,[\s\S]*?\.pane-host-menu\s*\{[^}]*backdrop-filter:\s*none/s,
+    );
+  });
+
+  it('keeps the file list mounted during refresh and resets only after path navigation', () => {
+    const fileList = readFileSync(
+      new URL('./features/browser/FileList.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(source).toContain('pane.isLoading && pane.files.length === 0');
+    expect(fileList).toContain('previousPathRef');
+    expect(fileList).toContain('parent.scrollTop = 0');
+    expect(fileList).toContain('useLayoutEffect');
+  });
+
+  it('paints the file header strip behind the native scrollbar gutter on every platform', () => {
+    expect(css).toContain('--file-header-bg:');
+    expect(css).toMatch(
+      /\.file-scroll-area\s*\{[^}]*background:\s*linear-gradient\([^}]*var\(--file-header-bg\)/s,
+    );
+    expect(css).toMatch(
+      /\.file-scroll-area::?-webkit-scrollbar-track\s*\{[^}]*background:\s*transparent/s,
+    );
+  });
+
+  it('uses a selection-driven Android file action strip without remote edit', () => {
+    const fileList = readFileSync(
+      new URL('./features/browser/FileList.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(source).toContain('mobile-file-actions');
+    expect(source).toContain('mobile-refresh-action');
+    expect(source).toContain('mobile-upload-action');
+    expect(source).toContain("setDialog({ type: 'mkdir' })");
+    expect(source).toContain("setDialog({ type: 'createFile' })");
+    expect(source).toContain("setDialog({ type: 'deleteConfirm' })");
+    expect(source).toContain('void handleOnlineEdit(mobileActionFile)');
+    expect(fileList).toContain('mobile-file-checkbox');
+    expect(fileList).toContain('mobile-select-all');
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.mobile-file-actions\s*\{[^}]*display:\s*flex/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.remote-edit-sessions\s*\{[^}]*display:\s*none/s,
+    );
+  });
+
+  it('fixes Android selection, columns, breadcrumb controls, and touch drag previews', () => {
+    expect(source).toContain('activator instanceof TouchEvent');
+    expect(source).toContain('activator.touches[0]');
+    expect(source).not.toContain("setOperationMessage(t('browser.invalidMove'), true)");
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.breadcrumb-edit-button\s*\{[^}]*position:\s*absolute[^}]*right:/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.file-row\.file-row--selected[^{]*\{[^}]*background:/s,
+    );
+    expect(css).toMatch(
+      /html\.mobile-platform[\s\S]*?\.file-owner-cell,[\s\S]*?\.file-permission-cell\s*\{[^}]*display:\s*none/s,
+    );
   });
 });

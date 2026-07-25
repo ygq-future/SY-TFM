@@ -1,8 +1,8 @@
-import { useRef, useCallback, useEffect, useState } from 'react';
+import { useRef, useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useDraggable, useDroppable } from '@dnd-kit/core';
+import { useDndContext, useDraggable, useDroppable } from '@dnd-kit/core';
 import { ArrowUp, ChevronDown, ChevronUp } from 'lucide-react';
 import type { RemoteFile } from '../../types/generated/RemoteFile';
 import type { AdapterCapability } from '../../types/enums/AdapterCapability';
@@ -32,15 +32,24 @@ export interface DirectoryDropData {
   targetDirectory: string;
 }
 
+/** 面板当前目录落点数据。 */
+export interface PaneDropData {
+  kind: 'pane';
+  paneIndex: PaneIndex;
+  hostId: string;
+  targetDirectory: string;
+}
+
 /** 普通文件占位落点：阻止父面板把文件行误判为空白目录区域。 */
 export interface BlockedDropData {
   kind: 'blocked';
   paneIndex: PaneIndex;
   hostId: string;
+  targetDirectory: string;
 }
 
 /** 文件列表内所有可能的落点数据。 */
-export type FileDropData = DirectoryDropData | BlockedDropData;
+export type FileDropData = DirectoryDropData | PaneDropData | BlockedDropData;
 
 /** 格式化文件大小。 */
 function formatSize(bytes: number): string {
@@ -62,6 +71,7 @@ function DndFileRow({
   children,
   paneIndex,
   hostId,
+  currentPath,
 }: {
   file: RemoteFile;
   index: number;
@@ -74,8 +84,12 @@ function DndFileRow({
   children: ReactNode;
   paneIndex: PaneIndex;
   hostId: string;
+  currentPath: string;
 }) {
   const { t } = useTranslation();
+  const { active } = useDndContext();
+  const activeSource = active?.data.current as FileDragData | undefined;
+  const isCrossHost = activeSource?.kind === 'file' && activeSource.hostId !== hostId;
   const draggable = useDraggable({
     id: `file:${paneIndex}:${hostId}:${file.fullPath}`,
     data: { kind: 'file', paneIndex, hostId, file } satisfies FileDragData,
@@ -90,7 +104,12 @@ function DndFileRow({
           hostId,
           targetDirectory: file.fullPath,
         } satisfies DirectoryDropData)
-      : ({ kind: 'blocked', paneIndex, hostId } satisfies FileDropData),
+      : ({
+          kind: 'blocked',
+          paneIndex,
+          hostId,
+          targetDirectory: currentPath,
+        } satisfies BlockedDropData),
   });
   const setNodeRef = useCallback(
     (node: HTMLElement | null) => {
@@ -121,8 +140,8 @@ function DndFileRow({
       {droppable.isOver && file.isDirectory && (
         <span className="file-drop-hint">
           {file.name === '..'
-            ? t('browser.dropToParent')
-            : t('browser.dropInto', { name: file.name })}
+            ? t(isCrossHost ? 'browser.copyToParent' : 'browser.dropToParent')
+            : t(isCrossHost ? 'browser.copyInto' : 'browser.dropInto', { name: file.name })}
         </span>
       )}
     </div>
@@ -158,7 +177,12 @@ export function FileList({
   currentPath: string;
 }) {
   const { t } = useTranslation();
+  const { active, over } = useDndContext();
+  const activeSource = active?.data.current as FileDragData | undefined;
+  const activeTarget = over?.data.current as FileDropData | undefined;
+  const isCrossHost = activeSource?.kind === 'file' && activeSource.hostId !== hostId;
   const parentRef = useRef<HTMLDivElement>(null);
+  const previousPathRef = useRef(currentPath);
   const selectionCleanupRef = useRef<(() => void) | null>(null);
   const lastSelectedIndexRef = useRef<number | null>(null);
   const [selectionBox, setSelectionBox] = useState<{
@@ -168,15 +192,26 @@ export function FileList({
     height: number;
   } | null>(null);
   const showOwner = capabilities !== null && (capabilities & CAP_OWNER_PERMISSIONS) !== 0;
+  const selectableFiles = files.filter((file) => file.name !== '..');
+  const allFilesSelected =
+    selectableFiles.length > 0 &&
+    selectableFiles.every((file) =>
+      selectedFiles.some((selected) => selected.fullPath === file.fullPath),
+    );
   const paneDroppable = useDroppable({
     id: `pane:${paneIndex}:${hostId}`,
     data: {
-      kind: 'directory',
+      kind: 'pane',
       paneIndex,
       hostId,
       targetDirectory: currentPath,
-    } satisfies DirectoryDropData,
+    } satisfies PaneDropData,
   });
+  const isCurrentDirectoryDropTarget =
+    paneDroppable.isOver ||
+    (activeTarget?.kind === 'blocked' &&
+      activeTarget.paneIndex === paneIndex &&
+      activeTarget.hostId === hostId);
   const setScrollRef = useCallback(
     (node: HTMLDivElement | null) => {
       parentRef.current = node;
@@ -192,6 +227,13 @@ export function FileList({
     paddingStart: FILE_TABLE_HEADER_HEIGHT,
     overscan: 10,
   });
+
+  useLayoutEffect(() => {
+    if (previousPathRef.current === currentPath) return;
+    previousPathRef.current = currentPath;
+    const parent = parentRef.current;
+    if (parent) parent.scrollTop = 0;
+  }, [currentPath]);
 
   const handleRowClick = useCallback(
     (e: React.MouseEvent, file: RemoteFile, index: number) => {
@@ -217,6 +259,7 @@ export function FileList({
 
   const handleSelectionPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
+      if (document.documentElement.classList.contains('mobile-platform')) return;
       if (event.button !== 0 || event.target !== event.currentTarget) return;
       const parent = parentRef.current;
       if (!parent) return;
@@ -258,12 +301,14 @@ export function FileList({
       const cleanup = () => {
         window.removeEventListener('pointermove', handlePointerMove);
         window.removeEventListener('pointerup', cleanup);
+        window.removeEventListener('pointercancel', cleanup);
         setSelectionBox(null);
         selectionCleanupRef.current = null;
       };
       selectionCleanupRef.current = cleanup;
       window.addEventListener('pointermove', handlePointerMove);
       window.addEventListener('pointerup', cleanup);
+      window.addEventListener('pointercancel', cleanup);
     },
     [files, onSelect],
   );
@@ -298,11 +343,25 @@ export function FileList({
       className={cn(
         'file-list',
         showOwner && 'file-list--with-owner',
-        paneDroppable.isOver && 'file-list--drop-target',
+        isCurrentDirectoryDropTarget && 'file-list--drop-target',
       )}
     >
+      {isCurrentDirectoryDropTarget && (
+        <span className="file-list-drop-hint">
+          {t(isCrossHost ? 'browser.copyToCurrent' : 'browser.moveToCurrent')}
+        </span>
+      )}
       <div ref={setScrollRef} className="file-scroll-area">
         <div className="file-table-header">
+          <div className="mobile-file-checkbox mobile-select-all">
+            <input
+              type="checkbox"
+              aria-label={t('browser.selectAll')}
+              checked={allFilesSelected}
+              onPointerDown={(event) => event.stopPropagation()}
+              onChange={(event) => onSelect(event.target.checked ? selectableFiles : [])}
+            />
+          </div>
           <div className="file-name-header">
             <SortHeader column="name" label={t('browser.name')} />
           </div>
@@ -343,16 +402,39 @@ export function FileList({
                 virtualSize={virtualRow.size}
                 paneIndex={paneIndex}
                 hostId={hostId}
+                currentPath={currentPath}
                 className={cn('file-row', isSelected && 'file-row--selected')}
                 onClick={(e) => handleRowClick(e, file, virtualRow.index)}
                 onDoubleClick={() => handleDoubleClick(file)}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
+                  if (document.documentElement.classList.contains('mobile-platform')) return;
                   if (!isSelected) onSelect([file]);
                   onContextMenu(event, file);
                 }}
               >
+                <div className="mobile-file-checkbox">
+                  {file.name !== '..' && (
+                    <input
+                      type="checkbox"
+                      aria-label={t('browser.selectFile', { name: file.name })}
+                      checked={isSelected}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onTouchStart={(event) => event.stopPropagation()}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) => {
+                        onSelect(
+                          event.target.checked
+                            ? [...selectedFiles, file]
+                            : selectedFiles.filter(
+                                (selected) => selected.fullPath !== file.fullPath,
+                              ),
+                        );
+                      }}
+                    />
+                  )}
+                </div>
                 <div className="file-icon-cell">
                   {file.name === '..' ? (
                     <ArrowUp className="file-up-icon" />

@@ -41,6 +41,10 @@ export type AppSettings = {
    */
   dataFontSize: number;
   /**
+   * Android 应用标题栏内容高度（不含系统安全区，像素）。
+   */
+  mobileTitlebarHeight: number;
+  /**
    * 默认下载路径（null = 使用平台默认）
    */
   defaultDownloadPath: string | null;

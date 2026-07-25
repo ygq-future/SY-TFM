@@ -65,7 +65,7 @@ interface BrowserState {
   updateTransfer: (operationId: string, transfer: Partial<TransferState>) => void;
   cancelTransfer: (operationId: string) => Promise<void>;
   setOperationMessage: (message: string, isError?: boolean) => void;
-  clearOperationMessage: () => void;
+  clearOperationMessage: (expectedMessage?: string) => void;
   clearDisconnectedPanes: (connectedHostIds: string[]) => void;
   downloadSelected: (pane: PaneIndex, hostId: string, localDir: string) => Promise<void>;
   deleteSelected: (pane: PaneIndex, hostId: string) => Promise<void>;
@@ -192,7 +192,12 @@ export const useBrowserStore = create<BrowserState>((set, get) => {
     },
     setOperationMessage: (operationMessage, operationIsError = false) =>
       set({ operationMessage, operationIsError }),
-    clearOperationMessage: () => set({ operationMessage: '', operationIsError: false }),
+    clearOperationMessage: (expectedMessage) =>
+      set((state) =>
+        expectedMessage && state.operationMessage !== expectedMessage
+          ? state
+          : { operationMessage: '', operationIsError: false },
+      ),
     clearDisconnectedPanes: (connectedHostIds) =>
       set((state) => {
         const panes = state.panes.map((pane) =>

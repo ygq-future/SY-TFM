@@ -14,7 +14,18 @@ describe('desktop startup and Rust target configuration', () => {
     expect(entry).toMatch(/getCurrentWindow\(\)[\s\S]*?\.show\(\)/);
     expect(entry).not.toContain('requestAnimationFrame');
     const app = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');
-    expect(app).toContain("import('./features/settings/SettingsDialog')");
+    expect(app).toContain("import { SettingsDialog } from './features/settings/SettingsDialog'");
+    expect(app).not.toContain("import('./features/settings/SettingsDialog')");
+    expect(app).not.toContain('preloadSettingsDialog');
+  });
+
+  it('hydrates platform typography before the first rendered frame', () => {
+    const entry = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8');
+
+    expect(entry).toContain('useSettingsStore.getState().hydrateSettings()');
+    expect(entry.indexOf('hydrateSettings()')).toBeLessThan(
+      entry.indexOf('createRoot(appRoot).render'),
+    );
   });
 
   it('uses distinct binary and library artifact names', () => {

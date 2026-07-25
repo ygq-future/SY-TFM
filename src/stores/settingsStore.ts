@@ -48,9 +48,18 @@ function queueSettingsPatch(patch: Partial<AppSettings>): void {
     });
 }
 
+/** 等待此前所有实时设置写入落盘，供关闭设置或进入后台前执行一次同步检查。 */
+export function flushSettingsWrites(): Promise<void> {
+  return settingsWriteQueue;
+}
+
 function resolveTheme(theme: Theme): AppearanceTheme {
   if (theme !== 'system') return theme;
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function normalizeMobileTitlebarHeight(height: number): number {
+  return Math.min(80, Math.max(32, Math.round(height)));
 }
 
 interface SettingsState {
@@ -67,6 +76,7 @@ interface SettingsState {
   labelFontSize: number;
   captionFontSize: number;
   dataFontSize: number;
+  mobileTitlebarHeight: number;
   defaultDownloadPath: string | null;
   defaultDataPath: string | null;
   windowTopmost: boolean;
@@ -84,6 +94,7 @@ interface SettingsState {
   setLabelFontSize: (fontSize: number) => void;
   setCaptionFontSize: (fontSize: number) => void;
   setDataFontSize: (fontSize: number) => void;
+  setMobileTitlebarHeight: (height: number) => void;
   setDefaultDownloadPath: (path: string | null) => void;
   setDefaultDataPath: (path: string | null) => void;
   setWindowTopmost: (topmost: boolean) => void;
@@ -105,6 +116,7 @@ export const useSettingsStore = create<SettingsState>()(
       labelFontSize: 12,
       captionFontSize: 11,
       dataFontSize: 12,
+      mobileTitlebarHeight: 48,
       defaultDownloadPath: null,
       defaultDataPath: null,
       windowTopmost: false,
@@ -127,6 +139,7 @@ export const useSettingsStore = create<SettingsState>()(
             labelFontSize: settings.labelFontSize,
             captionFontSize: settings.captionFontSize,
             dataFontSize: settings.dataFontSize,
+            mobileTitlebarHeight: normalizeMobileTitlebarHeight(settings.mobileTitlebarHeight),
             defaultDownloadPath: settings.defaultDownloadPath,
             defaultDataPath: settings.defaultDataPath,
             windowTopmost: settings.windowTopmost,
@@ -195,6 +208,11 @@ export const useSettingsStore = create<SettingsState>()(
         set({ dataFontSize: normalized });
         queueSettingsPatch({ dataFontSize: normalized });
       },
+      setMobileTitlebarHeight: (mobileTitlebarHeight) => {
+        const normalized = normalizeMobileTitlebarHeight(mobileTitlebarHeight);
+        set({ mobileTitlebarHeight: normalized });
+        queueSettingsPatch({ mobileTitlebarHeight: normalized });
+      },
       setDefaultDownloadPath: (defaultDownloadPath) => {
         set({ defaultDownloadPath });
         queueSettingsPatch({ defaultDownloadPath });
@@ -225,6 +243,7 @@ export const useSettingsStore = create<SettingsState>()(
         labelFontSize,
         captionFontSize,
         dataFontSize,
+        mobileTitlebarHeight,
         defaultDownloadPath,
         defaultDataPath,
         windowTopmost,
@@ -242,6 +261,7 @@ export const useSettingsStore = create<SettingsState>()(
         labelFontSize,
         captionFontSize,
         dataFontSize,
+        mobileTitlebarHeight,
         defaultDownloadPath,
         defaultDataPath,
         windowTopmost,
