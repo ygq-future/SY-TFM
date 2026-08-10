@@ -682,14 +682,19 @@ fn build_cloud_payload_for_platform(
 ) -> Result<PreparedCloudPayload, AppError> {
     decrypt_host_passwords(&mut settings)?;
     let current_background = capture_cloud_background_asset(&settings, platform)?;
-    let host_settings = settings
+    let mut host_settings = settings
         .hosts
         .iter()
-        .map(|host| CloudPlatformHostSettings {
-            host_id: host.id,
-            download_path: host.download_path.clone(),
+        .filter_map(|host| {
+            host.download_path
+                .clone()
+                .map(|download_path| CloudPlatformHostSettings {
+                    host_id: host.id,
+                    download_path: Some(download_path),
+                })
         })
-        .collect();
+        .collect::<Vec<_>>();
+    host_settings.sort_by_key(|entry| entry.host_id);
     for host in &mut settings.hosts {
         host.download_path = None;
     }
@@ -907,12 +912,10 @@ const fn background_asset_prefix(platform: Platform) -> &'static str {
 }
 
 fn cloud_scope_hash(payload: &CloudVaultPayload, platform: Platform) -> Result<String, AppError> {
+    let platform_payload = canonical_platform_payload(payload, platform);
     let scope = CloudComparisonScope {
         hosts: &payload.hosts,
-        platform: payload
-            .platforms
-            .iter()
-            .find(|entry| entry.platform == platform),
+        platform: platform_payload.as_ref(),
     };
     let serialized = serde_json::to_vec(&scope).map_err(invalid_backup_error)?;
     Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(serialized)))
@@ -1072,12 +1075,32 @@ fn cloud_platform_hash(
     payload: &CloudVaultPayload,
     platform: Platform,
 ) -> Result<String, AppError> {
-    let platform_payload = payload
-        .platforms
-        .iter()
-        .find(|entry| entry.platform == platform);
+    let platform_payload = canonical_platform_payload(payload, platform);
     let serialized = serde_json::to_vec(&platform_payload).map_err(invalid_backup_error)?;
     Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(serialized)))
+}
+
+fn canonical_platform_payload(
+    payload: &CloudVaultPayload,
+    platform: Platform,
+) -> Option<CloudPlatformPayload> {
+    let host_ids = payload
+        .hosts
+        .iter()
+        .map(|host| host.id)
+        .collect::<HashSet<_>>();
+    let mut platform_payload = payload
+        .platforms
+        .iter()
+        .find(|entry| entry.platform == platform)
+        .cloned()?;
+    platform_payload
+        .host_settings
+        .retain(|entry| entry.download_path.is_some() && host_ids.contains(&entry.host_id));
+    platform_payload
+        .host_settings
+        .sort_by_key(|entry| entry.host_id);
+    Some(platform_payload)
 }
 
 fn resolve_last_component_hashes(
@@ -2146,6 +2169,97 @@ mod tests {
         let (merged, _, _) = restore_cloud_settings_for_platform(remote, Platform::Android);
         assert_eq!(merged.hosts[0].name, "remote-host");
         assert_eq!(merged.accent_color, "local-accent");
+    }
+
+    #[test]
+    fn platform_host_settings_ignore_missing_null_override_after_remote_addition() {
+        let mut existing = sample_host("existing-host");
+        existing.download_path = Some("/storage/emulated/0/Download/existing".to_string());
+        let mut remote = build_cloud_payload_for_platform(
+            AppSettings {
+                hosts: vec![existing],
+                ..AppSettings::default()
+            },
+            None,
+            Platform::Android,
+        )
+        .expect("build Android baseline")
+        .payload;
+        remote.hosts.push(sample_host("remote-added-host"));
+
+        let (restored, _, _) =
+            restore_cloud_settings_for_platform(remote.clone(), Platform::Android);
+        let rebuilt =
+            build_cloud_payload_for_platform(restored, Some(remote.clone()), Platform::Android)
+                .expect("rebuild Android payload after pull")
+                .payload;
+
+        assert_eq!(
+            cloud_platform_hash(&rebuilt, Platform::Android).expect("hash rebuilt platform"),
+            cloud_platform_hash(&remote, Platform::Android).expect("hash remote platform")
+        );
+    }
+
+    #[test]
+    fn platform_host_settings_ignore_stale_override_after_remote_deletion() {
+        let mut kept = sample_host("kept-host");
+        kept.download_path = Some("/storage/emulated/0/Download/kept".to_string());
+        let mut deleted = sample_host("deleted-host");
+        deleted.download_path = Some("/storage/emulated/0/Download/deleted".to_string());
+        let mut remote = build_cloud_payload_for_platform(
+            AppSettings {
+                hosts: vec![kept, deleted],
+                ..AppSettings::default()
+            },
+            None,
+            Platform::Android,
+        )
+        .expect("build Android baseline")
+        .payload;
+        remote.hosts.remove(1);
+
+        let (restored, _, _) =
+            restore_cloud_settings_for_platform(remote.clone(), Platform::Android);
+        let rebuilt =
+            build_cloud_payload_for_platform(restored, Some(remote.clone()), Platform::Android)
+                .expect("rebuild Android payload after deletion")
+                .payload;
+
+        assert_eq!(
+            cloud_platform_hash(&rebuilt, Platform::Android).expect("hash rebuilt platform"),
+            cloud_platform_hash(&remote, Platform::Android).expect("hash remote platform")
+        );
+    }
+
+    #[test]
+    fn platform_host_settings_ignore_override_order_after_remote_reorder() {
+        let mut first = sample_host("first-host");
+        first.download_path = Some("/storage/emulated/0/Download/first".to_string());
+        let mut second = sample_host("second-host");
+        second.download_path = Some("/storage/emulated/0/Download/second".to_string());
+        let mut remote = build_cloud_payload_for_platform(
+            AppSettings {
+                hosts: vec![first, second],
+                ..AppSettings::default()
+            },
+            None,
+            Platform::Android,
+        )
+        .expect("build Android baseline")
+        .payload;
+        remote.hosts.reverse();
+
+        let (restored, _, _) =
+            restore_cloud_settings_for_platform(remote.clone(), Platform::Android);
+        let rebuilt =
+            build_cloud_payload_for_platform(restored, Some(remote.clone()), Platform::Android)
+                .expect("rebuild Android payload after reorder")
+                .payload;
+
+        assert_eq!(
+            cloud_platform_hash(&rebuilt, Platform::Android).expect("hash rebuilt platform"),
+            cloud_platform_hash(&remote, Platform::Android).expect("hash remote platform")
+        );
     }
 
     fn sample_host(name: &str) -> RemoteHost {
