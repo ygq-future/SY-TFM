@@ -17,14 +17,14 @@
 | 指标 | 值 |
 |------|-----|
 | 当前阶段 | Phase 0/1/2 已完成；Phase 3 Android 适配已启动 |
-| 当前任务 | Android 主机抽屉与动态工作区尺寸、圆角和滑动反馈复核 |
+| 当前任务 | Vault 持久同步生命周期已交付，等待 Android 与 Windows portable 人工构建验证 |
 | 总体进度 | 文档设计 100%，Phase 0/1 完成，Phase 2 为 22/22（2 项由新版交互取代） |
 | 阻塞项 | 无；Android 首次交叉编译与调试产物已验证 |
 | 文档状态 | ✅ 需求 ✅ 架构 ✅ 接口 ✅ 数据模型 ✅ 实现计划 ✅ 进度日志 |
 
 ### 0.2 当前在做
 
-> Windows 桌面基线保持冻结；Android 已完成真机安装运行，当前按原生平台标记独立重排移动端界面。
+> Vault 主机同步的持久待办、实时状态、退出冲刷和原子云端替换已完成；Android 与 Windows portable 产物由用户继续构建验证。
 
 ### 0.3 下一步计划
 
@@ -50,6 +50,30 @@
 ## 1. 会话日志
 
 > 每次开发会话在此追加记录，最新在最上面。
+
+### Session #082 — 2026-08-10
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-08-10 |
+| **类型** | Vault 主机同步持久化、实时状态与安全退出修复 |
+| **参与者** | 用户 + AI |
+
+**已确认根因:**
+
+- 主机删除先持久化本地设置，再延迟 1.5 秒启动自动同步；这段时间界面没有 Pending 状态，进程退出也没有冲刷，因此用户看到的“尚未同步”和数据竞争风险都是真实存在的
+- 原调度器保存并取消整个异步任务，新的主机变化可能取消已经进入网络 I/O 的旧同步；自动同步结果和错误也没有事件返回前端，状态面板只能等轮询刷新
+- 云端文档直接 PUT 到规范路径，中断安全依赖 WebDAV 服务端行为；同步完成时也缺少变化代次校验，可能错误清除更晚产生的本地待办
+
+**完成事项:**
+
+- `VaultSyncSettings` 增加向后兼容的持久 `syncPending` 与单调 `syncChangeGeneration`，运行态采用 Rust 导出的 `VaultSyncPhase`（Idle/Pending/Syncing/Failed）。主机新增、修改、排序、删除和导入均在本地保存前标记待同步；同步只在捕获代次仍是最新时清除待办
+- 自动同步改为仅取消仍处于等待期的 debounce timer；任务进入网络阶段前移除自己的 timer slot，后续变化会排入下一轮而不会中断当前请求。后端通过 `vault:status` 即时推送完整状态，前端状态栏和 Android 标题栏立即显示等待、同步、失败或完成，并在成功拉取后刷新设置与主机列表
+- 桌面窗口首次关闭会同步拦截并调用最长 10 秒的后端冲刷；成功后继续关闭，失败或超时则保留本地待办并显示“强制退出”选择。该监听通过原生 `mobile-platform` 标记明确排除 Android/iOS，不改变移动端后台生命周期
+- 云端更新先上传到 `/SY-TFM/.vault-upload-<uuid>.sytfm`，再通过协议无关的 `FileTransport::move_file` 替换规范文件；上传或 MOVE 失败会尽力清理临时文件，不再让规范路径暴露半成品 PUT
+- 生产构建额外发现 Vault 源码契约测试的 tuple 被推断为 `string | null`，已使用只读 tuple 完成类型收窄并单独提交
+
+**验证:** `bun run types:export`、`cargo fmt --all -- --check`、`cargo clippy --lib -- -D warnings`、`cargo test --lib`（134/134）、`bun lint`、`bun format`、`bun test`（30 files / 188 tests）与 `bun run build` 全部通过。受限沙箱第一次 Rust/前端全量测试分别因 Windows 凭据管理器不可访问和 `node_modules` 读取 EPERM 失败；在正常登录会话重跑后全部通过，未发现对应断言失败。Android 与 Windows portable 原生产物构建及跨设备实测留给用户执行。
 
 ### Session #081 — 2026-08-10
 
