@@ -1850,11 +1850,29 @@ async fn upload_document(
             }
         }
     });
+    let remote_temp = remote_upload_temp_path();
     let result = adapter
-        .upload_file(&temp.to_string_lossy(), &cloud_file_path(), tx)
+        .upload_file(&temp.to_string_lossy(), &remote_temp, tx)
         .await;
     let _ = drain.await;
-    result
+    if let Err(error) = result {
+        let _ = adapter.delete_file(&remote_temp).await;
+        return Err(error);
+    }
+    if let Err(error) = adapter.move_file(&remote_temp, &cloud_file_path()).await {
+        let _ = adapter.delete_file(&remote_temp).await;
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn remote_upload_temp_path() -> String {
+    cloud_resource_path(&format!(
+        "{}{}{}",
+        VaultResource::CloudUploadPrefix.as_str(),
+        Uuid::new_v4(),
+        VaultResource::CloudFileExtension.as_str()
+    ))
 }
 
 fn encrypted_temp_path() -> Result<PathBuf, AppError> {
@@ -1890,6 +1908,194 @@ fn invalid_backup_error(error: impl std::fmt::Display) -> AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct RecordingTransport {
+        operations: StdMutex<Vec<String>>,
+        fail_upload: bool,
+        fail_move: bool,
+    }
+
+    impl RecordingTransport {
+        fn new(fail_upload: bool, fail_move: bool) -> Self {
+            Self {
+                operations: StdMutex::new(Vec::new()),
+                fail_upload,
+                fail_move,
+            }
+        }
+
+        fn recorded_operations(&self) -> Vec<String> {
+            self.operations
+                .lock()
+                .map(|operations| operations.clone())
+                .unwrap_or_default()
+        }
+
+        fn record(&self, operation: String) {
+            if let Ok(mut operations) = self.operations.lock() {
+                operations.push(operation);
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl FileTransport for RecordingTransport {
+        fn protocol(&self) -> Protocol {
+            Protocol::WebDav
+        }
+
+        fn capabilities(&self) -> crate::enums::AdapterCapability {
+            crate::enums::AdapterCapability(0)
+        }
+
+        async fn connect(
+            &mut self,
+            _host: &RemoteHost,
+            _password: Option<&str>,
+        ) -> Result<(), AppError> {
+            Ok(())
+        }
+
+        async fn disconnect(&self) -> Result<(), AppError> {
+            Ok(())
+        }
+
+        async fn list_directory(
+            &self,
+            _path: &str,
+        ) -> Result<Vec<crate::models::RemoteFile>, AppError> {
+            Ok(Vec::new())
+        }
+
+        async fn download_file(
+            &self,
+            _remote_path: &str,
+            _local_path: &str,
+            _progress: crate::transport::ProgressTx,
+        ) -> Result<(), AppError> {
+            Err(AppError::protocol_error("unexpected download"))
+        }
+
+        async fn upload_file(
+            &self,
+            _local_path: &str,
+            remote_path: &str,
+            _progress: crate::transport::ProgressTx,
+        ) -> Result<(), AppError> {
+            self.record(format!("upload:{remote_path}"));
+            if self.fail_upload {
+                Err(AppError::protocol_error("injected upload failure"))
+            } else {
+                Ok(())
+            }
+        }
+
+        async fn delete_file(&self, path: &str) -> Result<(), AppError> {
+            self.record(format!("delete:{path}"));
+            Ok(())
+        }
+
+        async fn delete_directory(&self, _path: &str) -> Result<(), AppError> {
+            Ok(())
+        }
+
+        async fn create_directory(&self, _path: &str) -> Result<(), AppError> {
+            Ok(())
+        }
+
+        async fn move_file(&self, from: &str, to: &str) -> Result<(), AppError> {
+            self.record(format!("move:{from}->{to}"));
+            if self.fail_move {
+                Err(AppError::protocol_error("injected move failure"))
+            } else {
+                Ok(())
+            }
+        }
+
+        async fn get_working_dir(&self) -> Result<String, AppError> {
+            Ok("/".to_string())
+        }
+
+        async fn change_dir(&mut self, _path: &str) -> Result<(), AppError> {
+            Ok(())
+        }
+
+        async fn is_connected(&self) -> bool {
+            true
+        }
+    }
+
+    fn sample_vault_document() -> PortableVaultDocument {
+        PortableVaultDocument {
+            format: "test".to_string(),
+            vault_id: "vault-id".to_string(),
+            revision: 2,
+            updated_at: "2026-08-10T00:00:00Z".to_string(),
+            key_envelope: crate::models::VaultKeyEnvelope {
+                kdf: crate::models::VaultKdfParameters {
+                    salt: "salt".to_string(),
+                    memory_kib: 1,
+                    iterations: 1,
+                    parallelism: 1,
+                },
+                nonce: "nonce".to_string(),
+                ciphertext: "wrapped".to_string(),
+            },
+            payload_nonce: "payload-nonce".to_string(),
+            payload_encoding: None,
+            ciphertext: "ciphertext".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn upload_document_moves_complete_temp_file_to_canonical_path() {
+        let mut transport = RecordingTransport::new(false, false);
+
+        upload_document(&mut transport, &sample_vault_document())
+            .await
+            .expect("atomic upload");
+
+        let operations = transport.recorded_operations();
+        let uploaded_path = operations[0]
+            .strip_prefix("upload:")
+            .expect("upload operation");
+        assert!(uploaded_path.starts_with("/SY-TFM/.vault-upload-"));
+        assert_ne!(uploaded_path, cloud_file_path());
+        assert_eq!(
+            operations[1],
+            format!("move:{uploaded_path}->{}", cloud_file_path())
+        );
+    }
+
+    #[tokio::test]
+    async fn upload_document_cleans_temp_file_after_move_failure() {
+        let mut transport = RecordingTransport::new(false, true);
+
+        let error = upload_document(&mut transport, &sample_vault_document())
+            .await
+            .expect_err("move failure must escape");
+
+        let operations = transport.recorded_operations();
+        let uploaded_path = operations[0]
+            .strip_prefix("upload:")
+            .expect("upload operation");
+        assert_eq!(error.code, ErrorCode::ProtocolError);
+        assert_eq!(operations[2], format!("delete:{uploaded_path}"));
+    }
+
+    #[tokio::test]
+    async fn upload_document_never_moves_after_upload_failure() {
+        let mut transport = RecordingTransport::new(true, false);
+
+        upload_document(&mut transport, &sample_vault_document())
+            .await
+            .expect_err("upload failure must escape");
+
+        let operations = transport.recorded_operations();
+        assert!(operations
+            .iter()
+            .all(|operation| !operation.starts_with("move:")));
+    }
 
     #[test]
     fn host_mutation_marks_enabled_vault_pending_and_advances_generation() {

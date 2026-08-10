@@ -6,6 +6,10 @@ pub(crate) enum VaultResource {
     CloudDirectory,
     /// WebDAV 中的保险库文件名。
     CloudFile,
+    /// WebDAV 中的保险库临时上传文件名前缀。
+    CloudUploadPrefix,
+    /// 保险库文件扩展名。
+    CloudFileExtension,
     /// Windows 平台背景资源名称前缀。
     BackgroundWindowsPrefix,
     /// macOS 平台背景资源名称前缀。
@@ -39,6 +43,8 @@ impl VaultResource {
         match self {
             Self::CloudDirectory => "SY-TFM",
             Self::CloudFile => "sy-tfm-vault.sytfm",
+            Self::CloudUploadPrefix => ".vault-upload-",
+            Self::CloudFileExtension => ".sytfm",
             Self::BackgroundWindowsPrefix => "background-windows-",
             Self::BackgroundMacosPrefix => "background-macos-",
             Self::BackgroundLinuxPrefix => "background-linux-",
