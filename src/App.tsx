@@ -70,6 +70,7 @@ import { useConnectionStore } from './stores/connectionStore';
 import { createTransferOperationId, useBrowserStore, type PaneIndex } from './stores/browserStore';
 import { flushSettingsWrites, useSettingsStore } from './stores/settingsStore';
 import { useVaultSyncStore } from './stores/vaultSyncStore';
+import { useVaultCloseGuard } from './hooks/useVaultCloseGuard';
 import { isVaultSyncing, vaultStatusLabelKey } from './features/settings/vaultSyncStatusView';
 import { HostList } from './features/connection/HostList';
 import { Breadcrumb } from './features/browser/Breadcrumb';
@@ -1137,6 +1138,7 @@ function AppInner() {
     files: RemoteFile[];
   } | null>(null);
   const [backgroundImageSource, setBackgroundImageSource] = useState<string | null>(null);
+  const { closeFailureVisible, cancelClose, forceClose } = useVaultCloseGuard();
   const startupVaultSyncHandledRef = useRef(false);
   const vaultStatus = useVaultSyncStore((state) => state.status);
   const {
@@ -2064,6 +2066,16 @@ function AppInner() {
       </div>
       <GlobalStatusBar />
       {isSettingsOpen && <SettingsDialog onClose={handleSettingsClose} />}
+      {closeFailureVisible && (
+        <ConfirmDialog
+          title={t('settings.storage.vaultCloseForceTitle')}
+          message={t('settings.storage.vaultCloseForceMessage')}
+          confirmLabel={t('settings.storage.vaultCloseForceConfirm')}
+          danger
+          onConfirm={forceClose}
+          onCancel={cancelClose}
+        />
+      )}
       {pendingDrop && (
         <ConfirmDialog
           title={t(

@@ -347,6 +347,11 @@ export async function syncVaultNow(backupPassword?: string): Promise<VaultSyncSt
   });
 }
 
+/** 桌面关闭前冲刷尚未写入云端的主机变化。 */
+export async function flushVaultSync(): Promise<VaultSyncStatus> {
+  return invoke<VaultSyncStatus>('flush_vault_sync');
+}
+
 /** 从 WebDAV 的 SY-TFM 目录恢复保险库。 */
 export async function restoreVaultFromWebDav(
   credentials: VaultWebDavCredentials,
