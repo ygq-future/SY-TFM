@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use tauri::Emitter;
+use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 use crate::core::{EditSessionManager, SessionManager, TransferManager};
@@ -1371,8 +1371,17 @@ pub async fn save_vault_backup_password(
 
 /// 立即双向核对云端保险库，只在本地范围确有变化时上传新的 revision。
 #[tauri::command]
-pub async fn sync_vault_now(backup_password: Option<String>) -> Result<VaultSyncStatus, AppError> {
-    crate::core::vault_sync::sync_now(backup_password).await
+pub async fn sync_vault_now(
+    app: AppHandle,
+    backup_password: Option<String>,
+) -> Result<VaultSyncStatus, AppError> {
+    crate::core::vault_sync::sync_now_and_emit(&app, backup_password).await
+}
+
+/// 桌面关闭前冲刷尚未写入云端的主机变化。
+#[tauri::command]
+pub async fn flush_vault_sync(app: AppHandle) -> Result<VaultSyncStatus, AppError> {
+    crate::core::vault_sync::flush_pending_sync(&app).await
 }
 
 /// 从 WebDAV 的固定 `SY-TFM` 目录恢复跨设备保险库。
@@ -1590,9 +1599,12 @@ fn password_update(existing: &str, incoming: &str, clear_password: bool) -> Pass
 
 /// 保存主机（新增/更新）。空密码保留已有密文，只有显式清除才会删除。
 #[tauri::command]
-pub fn save_host(host: RemoteHost, clear_password: Option<bool>) -> Result<(), AppError> {
+pub fn save_host(
+    app: AppHandle,
+    host: RemoteHost,
+    clear_password: Option<bool>,
+) -> Result<(), AppError> {
     let mut settings = SettingsService::load()?;
-    crate::core::vault_sync::capture_host_sync_baseline(&mut settings)?;
     let mut host = host;
     let existing_host = settings
         .hosts
@@ -1627,13 +1639,15 @@ pub fn save_host(host: RemoteHost, clear_password: Option<bool>) -> Result<(), A
         return Ok(());
     }
 
+    crate::core::vault_sync::capture_host_sync_baseline(&mut settings)?;
     if let Some(existing) = settings.hosts.iter_mut().find(|h| h.id == host.id) {
         *existing = host;
     } else {
         settings.hosts.push(host);
     }
+    crate::core::vault_sync::mark_host_sync_pending(&mut settings);
     SettingsService::save(&settings)?;
-    crate::core::vault_sync::schedule_auto_sync();
+    crate::core::vault_sync::schedule_auto_sync(app);
     Ok(())
 }
 
@@ -1668,16 +1682,21 @@ fn reorder_hosts_in_memory(
 
 /// 按给定 ID 顺序原子保存主机列表；不改变任何主机字段或密码。
 #[tauri::command]
-pub fn reorder_hosts(host_ids: Vec<String>) -> Result<(), AppError> {
+pub fn reorder_hosts(app: AppHandle, host_ids: Vec<String>) -> Result<(), AppError> {
     let host_ids = host_ids
         .iter()
         .map(|id| parse_uuid(id))
         .collect::<Result<Vec<_>, _>>()?;
     let mut settings = SettingsService::load()?;
+    let reordered = reorder_hosts_in_memory(&settings.hosts, &host_ids)?;
+    if reordered == settings.hosts {
+        return Ok(());
+    }
     crate::core::vault_sync::capture_host_sync_baseline(&mut settings)?;
-    settings.hosts = reorder_hosts_in_memory(&settings.hosts, &host_ids)?;
+    settings.hosts = reordered;
+    crate::core::vault_sync::mark_host_sync_pending(&mut settings);
     SettingsService::save(&settings)?;
-    crate::core::vault_sync::schedule_auto_sync();
+    crate::core::vault_sync::schedule_auto_sync(app);
     Ok(())
 }
 
@@ -1888,13 +1907,17 @@ mod password_update_tests {
 
 /// 删除主机。
 #[tauri::command]
-pub fn delete_host(host_id: String) -> Result<(), AppError> {
+pub fn delete_host(app: AppHandle, host_id: String) -> Result<(), AppError> {
     let uuid = parse_uuid(&host_id)?;
     let mut settings = SettingsService::load()?;
+    if !settings.hosts.iter().any(|host| host.id == uuid) {
+        return Ok(());
+    }
     crate::core::vault_sync::capture_host_sync_baseline(&mut settings)?;
     settings.hosts.retain(|h| h.id != uuid);
+    crate::core::vault_sync::mark_host_sync_pending(&mut settings);
     SettingsService::save(&settings)?;
-    crate::core::vault_sync::schedule_auto_sync();
+    crate::core::vault_sync::schedule_auto_sync(app);
     Ok(())
 }
 
@@ -1907,7 +1930,10 @@ pub fn export_hosts() -> Result<Vec<HostDto>, AppError> {
 
 /// 导入主机配置。
 #[tauri::command]
-pub fn import_hosts(hosts: Vec<HostDto>) -> Result<(), AppError> {
+pub fn import_hosts(app: AppHandle, hosts: Vec<HostDto>) -> Result<(), AppError> {
+    if hosts.is_empty() {
+        return Ok(());
+    }
     let mut settings = SettingsService::load()?;
     crate::core::vault_sync::capture_host_sync_baseline(&mut settings)?;
     for dto in hosts {
@@ -1928,7 +1954,8 @@ pub fn import_hosts(hosts: Vec<HostDto>) -> Result<(), AppError> {
         };
         settings.hosts.push(host);
     }
+    crate::core::vault_sync::mark_host_sync_pending(&mut settings);
     SettingsService::save(&settings)?;
-    crate::core::vault_sync::schedule_auto_sync();
+    crate::core::vault_sync::schedule_auto_sync(app);
     Ok(())
 }

@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex as StdMutex, OnceLock};
 
 use base64::Engine;
@@ -11,6 +12,7 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -20,6 +22,7 @@ use crate::crypto::portable_vault::{
 };
 use crate::crypto::secret_protector::{SecretProtector, ENCRYPTED_PREFIX};
 use crate::enums::app_directory::AppDirectory;
+use crate::enums::app_event::AppEvent;
 use crate::enums::vault_policy::VaultPolicy;
 use crate::enums::vault_resource::VaultResource;
 use crate::enums::{ErrorCode, Platform, Protocol, VaultSyncPhase};
@@ -31,8 +34,14 @@ use crate::storage::SettingsService;
 use crate::transport::{create_adapter, FileTransport, ProgressEvent};
 
 static VAULT_SYNC_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-static PENDING_AUTO_SYNC: OnceLock<StdMutex<Option<tauri::async_runtime::JoinHandle<()>>>> =
-    OnceLock::new();
+static VAULT_SYNC_PHASE: OnceLock<StdMutex<VaultSyncPhase>> = OnceLock::new();
+static NEXT_AUTO_SYNC_TASK_ID: AtomicU64 = AtomicU64::new(1);
+static PENDING_AUTO_SYNC: OnceLock<StdMutex<Option<PendingAutoSyncTask>>> = OnceLock::new();
+
+struct PendingAutoSyncTask {
+    id: u64,
+    handle: tauri::async_runtime::JoinHandle<()>,
+}
 
 /// 保险库中加密保存的跨设备设置载荷。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,7 +150,7 @@ pub fn status() -> Result<VaultSyncStatus, AppError> {
     Ok(VaultSyncStatus {
         configured: !sync.webdav_url.is_empty() && !sync.username.is_empty() && password_saved,
         enabled: sync.enabled,
-        phase: resolved_sync_phase(VaultSyncPhase::Idle, sync.sync_pending),
+        phase: resolved_sync_phase(runtime_sync_phase(), sync.sync_pending),
         vault_initialized: !sync.vault_id.is_empty() && sync.key_envelope.is_some(),
         password_saved,
         backup_password_saved,
@@ -153,6 +162,33 @@ pub fn status() -> Result<VaultSyncStatus, AppError> {
         unlocked_on_device: key_storage::get_vault_key()?.is_some(),
         refresh_interval_ms: VaultPolicy::StatusRefreshMilliseconds.value(),
     })
+}
+
+fn runtime_sync_phase() -> VaultSyncPhase {
+    VAULT_SYNC_PHASE
+        .get_or_init(|| StdMutex::new(VaultSyncPhase::Idle))
+        .lock()
+        .map(|phase| *phase)
+        .unwrap_or(VaultSyncPhase::Failed)
+}
+
+fn set_runtime_sync_phase(phase: VaultSyncPhase) {
+    if let Ok(mut current) = VAULT_SYNC_PHASE
+        .get_or_init(|| StdMutex::new(VaultSyncPhase::Idle))
+        .lock()
+    {
+        *current = phase;
+    }
+}
+
+fn emit_status(app: &AppHandle, sync_status: &VaultSyncStatus) {
+    let _ = app.emit(AppEvent::VaultStatus.as_str(), sync_status);
+}
+
+fn emit_current_status(app: &AppHandle) {
+    if let Ok(sync_status) = status() {
+        emit_status(app, &sync_status);
+    }
 }
 
 const fn resolved_sync_phase(runtime_phase: VaultSyncPhase, sync_pending: bool) -> VaultSyncPhase {
@@ -185,7 +221,7 @@ fn locally_protected_secret_is_readable(value: &str) -> Result<bool, AppError> {
 }
 
 /// 在主机连续变化停止后执行一次双向同步；后来的调用会替换尚未执行的任务。
-pub fn schedule_auto_sync() {
+pub fn schedule_auto_sync(app: AppHandle) {
     let enabled = SettingsService::load()
         .map(|settings| settings.vault_sync.enabled)
         .unwrap_or(false);
@@ -196,16 +232,41 @@ pub fn schedule_auto_sync() {
     let Ok(mut slot) = pending.lock() else {
         return;
     };
-    if let Some(handle) = slot.take() {
-        handle.abort();
+    if let Some(task) = slot.take() {
+        task.handle.abort();
     }
-    *slot = Some(tauri::async_runtime::spawn(async {
+    set_runtime_sync_phase(VaultSyncPhase::Pending);
+    emit_current_status(&app);
+    let task_id = NEXT_AUTO_SYNC_TASK_ID.fetch_add(1, Ordering::Relaxed);
+    let handle = tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(
             VaultPolicy::AutoSyncDebounceMilliseconds.value() as u64,
         ))
         .await;
-        let _ = sync_now(None).await;
-    }));
+        if !take_debounce_task(task_id) {
+            return;
+        }
+        let _ = sync_now_and_emit(&app, None).await;
+    });
+    *slot = Some(PendingAutoSyncTask {
+        id: task_id,
+        handle,
+    });
+}
+
+fn take_debounce_task(task_id: u64) -> bool {
+    let Some(pending) = PENDING_AUTO_SYNC.get() else {
+        return false;
+    };
+    let Ok(mut slot) = pending.lock() else {
+        return false;
+    };
+    if slot.as_ref().is_some_and(|task| task.id == task_id) {
+        slot.take();
+        true
+    } else {
+        false
+    }
 }
 
 fn cancel_auto_sync() {
@@ -213,8 +274,8 @@ fn cancel_auto_sync() {
         return;
     };
     if let Ok(mut slot) = pending.lock() {
-        if let Some(handle) = slot.take() {
-            handle.abort();
+        if let Some(task) = slot.take() {
+            task.handle.abort();
         }
     }
 }
@@ -338,9 +399,86 @@ pub async fn save_backup_password(
 
 /// 双向比较共享主机与当前平台分区，仅对实际变化上传 revision，并拉取其他设备变更。
 pub async fn sync_now(backup_password: Option<String>) -> Result<VaultSyncStatus, AppError> {
+    run_sync(backup_password, None).await
+}
+
+/// 执行一次双向同步，并向应用窗口发布完整阶段状态。
+pub async fn sync_now_and_emit(
+    app: &AppHandle,
+    backup_password: Option<String>,
+) -> Result<VaultSyncStatus, AppError> {
+    run_sync(backup_password, Some(app)).await
+}
+
+/// 在桌面关闭前冲刷持久化的本地主机变化，并限制最长等待时间。
+pub async fn flush_pending_sync(app: &AppHandle) -> Result<VaultSyncStatus, AppError> {
+    cancel_auto_sync();
+    let timeout =
+        std::time::Duration::from_millis(VaultPolicy::CloseFlushTimeoutMilliseconds.value() as u64);
+    match tokio::time::timeout(timeout, flush_pending_sync_inner(app)).await {
+        Ok(result) => result,
+        Err(_) => {
+            set_runtime_sync_phase(VaultSyncPhase::Failed);
+            emit_current_status(app);
+            Err(AppError::new(
+                ErrorCode::OperationTimeout,
+                "关闭前保险库同步超时",
+            ))
+        }
+    }
+}
+
+async fn flush_pending_sync_inner(app: &AppHandle) -> Result<VaultSyncStatus, AppError> {
+    loop {
+        cancel_auto_sync();
+        let current = SettingsService::load()?;
+        if !current.vault_sync.enabled {
+            return status();
+        }
+        if !current.vault_sync.sync_pending {
+            if matches!(runtime_sync_phase(), VaultSyncPhase::Syncing) {
+                let guard = sync_lock().lock().await;
+                drop(guard);
+                continue;
+            }
+            return status();
+        }
+        sync_now_and_emit(app, None).await?;
+    }
+}
+
+async fn run_sync(
+    backup_password: Option<String>,
+    app: Option<&AppHandle>,
+) -> Result<VaultSyncStatus, AppError> {
     let _guard = sync_lock().lock().await;
+    set_runtime_sync_phase(VaultSyncPhase::Syncing);
+    if let Some(app) = app {
+        emit_current_status(app);
+    }
+    match sync_now_locked(backup_password).await {
+        Ok(_) => {
+            set_runtime_sync_phase(VaultSyncPhase::Idle);
+            let latest = status()?;
+            if let Some(app) = app {
+                emit_status(app, &latest);
+            }
+            Ok(latest)
+        }
+        Err(error) => {
+            set_runtime_sync_phase(VaultSyncPhase::Failed);
+            if let Some(app) = app {
+                emit_current_status(app);
+            }
+            Err(error)
+        }
+    }
+}
+
+async fn sync_now_locked(backup_password: Option<String>) -> Result<VaultSyncStatus, AppError> {
     let settings = SettingsService::load()?;
     let sync = settings.vault_sync.clone();
+    let sync_generation = sync.sync_change_generation;
     if !sync.enabled {
         return Err(AppError::new(
             ErrorCode::VaultLocked,
@@ -487,6 +625,7 @@ pub async fn sync_now(backup_password: Option<String>) -> Result<VaultSyncStatus
                 final_scope_hash,
                 final_hosts_hash,
                 final_platform_hash,
+                sync_generation,
             )
             .await
         } else {
@@ -498,6 +637,7 @@ pub async fn sync_now(backup_password: Option<String>) -> Result<VaultSyncStatus
                 final_hosts_hash,
                 final_platform_hash,
                 &final_payload.hosts,
+                sync_generation,
             )
         };
         let _ = adapter.disconnect().await;
@@ -534,6 +674,7 @@ pub async fn sync_now(backup_password: Option<String>) -> Result<VaultSyncStatus
             final_scope_hash,
             final_hosts_hash,
             final_platform_hash,
+            sync_generation,
         )
         .await
     } else {
@@ -545,6 +686,7 @@ pub async fn sync_now(backup_password: Option<String>) -> Result<VaultSyncStatus
             final_hosts_hash,
             final_platform_hash,
             &final_payload.hosts,
+            sync_generation,
         )
     };
     let _ = adapter.disconnect().await;
@@ -1189,6 +1331,7 @@ fn replace_platform_payload(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn save_sync_checkpoint(
     vault_id: &str,
     revision: u64,
@@ -1197,6 +1340,7 @@ fn save_sync_checkpoint(
     hosts_hash: String,
     platform_hash: String,
     hosts: &[RemoteHost],
+    sync_generation: u64,
 ) -> Result<VaultSyncStatus, AppError> {
     let mut latest = SettingsService::load()?;
     if latest.vault_sync.vault_id != vault_id {
@@ -1211,6 +1355,7 @@ fn save_sync_checkpoint(
     latest.vault_sync.last_synced_hosts_hash = hosts_hash;
     latest.vault_sync.last_synced_hosts_snapshot = protect_hosts_snapshot(hosts)?;
     latest.vault_sync.last_synced_platform_hash = platform_hash;
+    finalize_pending_generation(&mut latest, sync_generation);
     SettingsService::save(&latest)?;
     status()
 }
@@ -1226,6 +1371,7 @@ async fn apply_remote_scope(
     scope_hash: String,
     hosts_hash: String,
     platform_hash: String,
+    sync_generation: u64,
 ) -> Result<VaultSyncStatus, AppError> {
     let hosts_snapshot = protect_hosts_snapshot(&payload.hosts)?;
     let (mut merged, background_image, background_asset) =
@@ -1240,15 +1386,27 @@ async fn apply_remote_scope(
     } else {
         merged.background_image_path = local.background_image_path.clone();
     }
-    merged.vault_sync = local.vault_sync.clone();
+    let latest = SettingsService::load()?;
+    let generation_changed = latest.vault_sync.sync_change_generation != sync_generation;
+    if generation_changed {
+        merged.hosts = latest.hosts.clone();
+    }
+    merged.vault_sync = latest.vault_sync;
     merged.vault_sync.last_synced_revision = revision;
     merged.vault_sync.last_synced_at = Some(updated_at);
     merged.vault_sync.last_synced_scope_hash = scope_hash;
     merged.vault_sync.last_synced_hosts_hash = hosts_hash;
     merged.vault_sync.last_synced_hosts_snapshot = hosts_snapshot;
     merged.vault_sync.last_synced_platform_hash = platform_hash;
+    finalize_pending_generation(&mut merged, sync_generation);
     SettingsService::save(&merged)?;
     status()
+}
+
+fn finalize_pending_generation(settings: &mut AppSettings, sync_generation: u64) {
+    if settings.vault_sync.sync_change_generation == sync_generation {
+        settings.vault_sync.sync_pending = false;
+    }
 }
 
 fn decrypt_host_passwords(settings: &mut AppSettings) -> Result<(), AppError> {
@@ -1754,6 +1912,33 @@ mod tests {
             resolved_sync_phase(VaultSyncPhase::Idle, false),
             VaultSyncPhase::Idle
         );
+    }
+
+    fn enabled_pending_settings(generation: u64) -> AppSettings {
+        let mut settings = AppSettings::default();
+        settings.vault_sync.enabled = true;
+        settings.vault_sync.sync_pending = true;
+        settings.vault_sync.sync_change_generation = generation;
+        settings
+    }
+
+    #[test]
+    fn matching_generation_clears_pending_after_success() {
+        let mut latest = enabled_pending_settings(4);
+
+        finalize_pending_generation(&mut latest, 4);
+
+        assert!(!latest.vault_sync.sync_pending);
+    }
+
+    #[test]
+    fn newer_generation_survives_older_sync_completion() {
+        let mut latest = enabled_pending_settings(5);
+
+        finalize_pending_generation(&mut latest, 4);
+
+        assert!(latest.vault_sync.sync_pending);
+        assert_eq!(latest.vault_sync.sync_change_generation, 5);
     }
 
     #[test]

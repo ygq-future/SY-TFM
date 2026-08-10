@@ -162,6 +162,31 @@ describe('portable vault and WebDAV sync', () => {
     );
   });
 
+  it('persists host changes as pending before cancellation-safe auto sync', () => {
+    for (const [start, end] of [
+      ['pub fn save_host', 'fn reorder_hosts_in_memory'],
+      ['pub fn reorder_hosts', '#[cfg(test)]'],
+      ['pub fn delete_host', 'pub fn export_hosts'],
+      ['pub fn import_hosts', null],
+    ]) {
+      const startIndex = commands.indexOf(start);
+      const command = commands.slice(
+        startIndex,
+        end === null ? commands.length : commands.indexOf(end, startIndex),
+      );
+      expect(command.indexOf('mark_host_sync_pending')).toBeGreaterThan(-1);
+      expect(command.indexOf('SettingsService::save(&settings)')).toBeGreaterThan(
+        command.indexOf('mark_host_sync_pending'),
+      );
+      expect(command.indexOf('schedule_auto_sync(app)')).toBeGreaterThan(
+        command.indexOf('SettingsService::save(&settings)'),
+      );
+    }
+    expect(backend).toMatch(
+      /take_debounce_task\(task_id\)[\s\S]*?sync_now_and_emit\(&app, None\)\.await/,
+    );
+  });
+
   it('keeps local portable exports as complete single-device backups', () => {
     expect(backend).toContain('build_portable_payload');
     expect(backend).toContain('capture_background_image');

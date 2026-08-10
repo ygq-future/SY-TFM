@@ -106,6 +106,7 @@ pub fn run() {
             commands::save_vault_backup_password,
             commands::enable_vault_sync,
             commands::sync_vault_now,
+            commands::flush_vault_sync,
             commands::restore_vault_from_webdav,
             commands::pause_vault_sync,
             commands::resume_vault_sync,
