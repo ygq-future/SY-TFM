@@ -1142,6 +1142,7 @@ function AppInner() {
     files: RemoteFile[];
   } | null>(null);
   const [backgroundImageSource, setBackgroundImageSource] = useState<string | null>(null);
+  const startupVaultSyncHandledRef = useRef(false);
   const vaultStatus = useVaultSyncStore((state) => state.status);
   const {
     hosts,
@@ -1180,6 +1181,12 @@ function AppInner() {
       await useVaultSyncStore.getState().refreshStatus();
     }
   }, []);
+
+  useEffect(() => {
+    if (startupVaultSyncHandledRef.current || vaultStatus === null) return;
+    startupVaultSyncHandledRef.current = true;
+    if (vaultStatus.enabled) void reconcileVaultState();
+  }, [reconcileVaultState, vaultStatus]);
 
   const handleSettingsClose = useCallback(() => {
     setIsSettingsOpen(false);

@@ -149,6 +149,19 @@ describe('portable vault and WebDAV sync', () => {
     expect(backend).toContain('apply_remote_scope');
   });
 
+  it('reconciles an enabled vault once as soon as its initial status resolves', () => {
+    expect(app).toContain('const startupVaultSyncHandledRef = useRef(false);');
+    expect(app).toMatch(
+      /if \(startupVaultSyncHandledRef\.current \|\| vaultStatus === null\) return;[\s\S]*?startupVaultSyncHandledRef\.current = true;[\s\S]*?if \(vaultStatus\.enabled\) void reconcileVaultState\(\);/,
+    );
+    expect(app.indexOf('startupVaultSyncHandledRef.current = true')).toBeLessThan(
+      app.indexOf(
+        'window.setInterval(() =>',
+        app.indexOf('startupVaultSyncHandledRef.current = true'),
+      ),
+    );
+  });
+
   it('keeps local portable exports as complete single-device backups', () => {
     expect(backend).toContain('build_portable_payload');
     expect(backend).toContain('capture_background_image');
