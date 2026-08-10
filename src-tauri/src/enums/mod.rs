@@ -24,6 +24,7 @@ pub mod transfer_direction;
 pub(crate) mod transfer_policy;
 pub(crate) mod vault_policy;
 pub(crate) mod vault_resource;
+pub mod vault_sync_phase;
 pub(crate) mod webdav_depth;
 
 pub use adapter_capability::AdapterCapability;
@@ -39,3 +40,4 @@ pub use sort_column::SortColumn;
 pub use sort_order::SortOrder;
 pub use theme::Theme;
 pub use transfer_direction::TransferDirection;
+pub use vault_sync_phase::VaultSyncPhase;

@@ -18,6 +18,8 @@ pub(crate) enum VaultPolicy {
     AutoSyncDebounceMilliseconds,
     /// 前端同步状态刷新周期（毫秒）。
     StatusRefreshMilliseconds,
+    /// 桌面关闭前等待保险库冲刷的最长毫秒数。
+    CloseFlushTimeoutMilliseconds,
     /// 单个保险库文件允许的最大字节数。
     MaximumFileBytes,
     /// 单个平台背景资源解压后的最大字节数。
@@ -45,6 +47,7 @@ impl VaultPolicy {
             Self::MinimumPasswordCharacters => 8,
             Self::AutoSyncDebounceMilliseconds => 1_500,
             Self::StatusRefreshMilliseconds => 30_000,
+            Self::CloseFlushTimeoutMilliseconds => 10_000,
             Self::MaximumFileBytes => 32 * 1024 * 1024,
             Self::MaximumBackgroundBytes => 20 * 1024 * 1024,
             Self::PortablePayloadSchemaVersion => 1,

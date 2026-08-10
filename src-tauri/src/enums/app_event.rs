@@ -20,6 +20,8 @@ pub(crate) enum AppEvent {
     EditorError,
     /// 外部编辑会话因连接断开而失效。
     EditorSessionInvalid,
+    /// 保险库同步状态变化。
+    VaultStatus,
 }
 
 impl AppEvent {
@@ -35,6 +37,7 @@ impl AppEvent {
             Self::EditorSynced => "editor:synced",
             Self::EditorError => "editor:error",
             Self::EditorSessionInvalid => "editor:session-invalid",
+            Self::VaultStatus => "vault:status",
         }
     }
 }

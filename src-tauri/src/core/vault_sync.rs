@@ -22,7 +22,7 @@ use crate::crypto::secret_protector::{SecretProtector, ENCRYPTED_PREFIX};
 use crate::enums::app_directory::AppDirectory;
 use crate::enums::vault_policy::VaultPolicy;
 use crate::enums::vault_resource::VaultResource;
-use crate::enums::{ErrorCode, Platform, Protocol};
+use crate::enums::{ErrorCode, Platform, Protocol, VaultSyncPhase};
 use crate::error::AppError;
 use crate::models::{
     AppSettings, RemoteHost, VaultSyncSettings, VaultSyncStatus, VaultWebDavCredentials,
@@ -141,6 +141,7 @@ pub fn status() -> Result<VaultSyncStatus, AppError> {
     Ok(VaultSyncStatus {
         configured: !sync.webdav_url.is_empty() && !sync.username.is_empty() && password_saved,
         enabled: sync.enabled,
+        phase: resolved_sync_phase(VaultSyncPhase::Idle, sync.sync_pending),
         vault_initialized: !sync.vault_id.is_empty() && sync.key_envelope.is_some(),
         password_saved,
         backup_password_saved,
@@ -152,6 +153,24 @@ pub fn status() -> Result<VaultSyncStatus, AppError> {
         unlocked_on_device: key_storage::get_vault_key()?.is_some(),
         refresh_interval_ms: VaultPolicy::StatusRefreshMilliseconds.value(),
     })
+}
+
+const fn resolved_sync_phase(runtime_phase: VaultSyncPhase, sync_pending: bool) -> VaultSyncPhase {
+    if matches!(runtime_phase, VaultSyncPhase::Idle) && sync_pending {
+        VaultSyncPhase::Pending
+    } else {
+        runtime_phase
+    }
+}
+
+/// 将一次共享主机变化持久标记为待同步。
+pub fn mark_host_sync_pending(settings: &mut AppSettings) {
+    if !settings.vault_sync.enabled {
+        return;
+    }
+    settings.vault_sync.sync_pending = true;
+    settings.vault_sync.sync_change_generation =
+        settings.vault_sync.sync_change_generation.saturating_add(1);
 }
 
 fn locally_protected_secret_is_readable(value: &str) -> Result<bool, AppError> {
@@ -251,6 +270,8 @@ pub async fn enable(
         last_synced_hosts_hash: hosts_hash,
         last_synced_hosts_snapshot: hosts_snapshot,
         last_synced_platform_hash: platform_hash,
+        sync_pending: false,
+        sync_change_generation: 0,
     };
     SettingsService::save(&settings)?;
     status()
@@ -579,6 +600,8 @@ pub async fn restore(
         last_synced_hosts_hash: hosts_hash,
         last_synced_hosts_snapshot: hosts_snapshot,
         last_synced_platform_hash: platform_hash,
+        sync_pending: false,
+        sync_change_generation: 0,
     };
     key_storage::store_vault_key(&key)?;
     SettingsService::save(&restored)?;
@@ -1711,6 +1734,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn host_mutation_marks_enabled_vault_pending_and_advances_generation() {
+        let mut settings = AppSettings::default();
+        settings.vault_sync.enabled = true;
+
+        mark_host_sync_pending(&mut settings);
+
+        assert!(settings.vault_sync.sync_pending);
+        assert_eq!(settings.vault_sync.sync_change_generation, 1);
+    }
+
+    #[test]
+    fn idle_runtime_phase_exposes_durable_pending_after_restart() {
+        assert_eq!(
+            resolved_sync_phase(VaultSyncPhase::Idle, true),
+            VaultSyncPhase::Pending
+        );
+        assert_eq!(
+            resolved_sync_phase(VaultSyncPhase::Idle, false),
+            VaultSyncPhase::Idle
+        );
+    }
+
+    #[test]
     fn portable_payload_keeps_complete_settings_and_plaintext_password() {
         let mut settings = AppSettings {
             default_download_path: Some("C:/Downloads".to_string()),
@@ -1891,6 +1937,8 @@ mod tests {
                 last_synced_hosts_hash: "hosts-hash".to_string(),
                 last_synced_hosts_snapshot: "encrypted-snapshot".to_string(),
                 last_synced_platform_hash: "platform-hash".to_string(),
+                sync_pending: false,
+                sync_change_generation: 0,
             },
             ..AppSettings::default()
         };

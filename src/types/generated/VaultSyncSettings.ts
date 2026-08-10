@@ -57,4 +57,12 @@ export type VaultSyncSettings = {
    * 上次同步时当前平台设置分区的独立 SHA-256 内容指纹。
    */
   lastSyncedPlatformHash: string;
+  /**
+   * 是否存在尚未确认写入云端的本地主机变化。
+   */
+  syncPending: boolean;
+  /**
+   * 本地主机共享数据变化的单调递增代际。
+   */
+  syncChangeGeneration: bigint;
 };

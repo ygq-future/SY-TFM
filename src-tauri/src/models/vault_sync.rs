@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::enums::VaultSyncPhase;
+
 /// 备份密码派生密钥所需的公开参数。
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/types/generated/")]
@@ -73,6 +75,12 @@ pub struct VaultSyncSettings {
     /// 上次同步时当前平台设置分区的独立 SHA-256 内容指纹。
     #[serde(default)]
     pub last_synced_platform_hash: String,
+    /// 是否存在尚未确认写入云端的本地主机变化。
+    #[serde(default)]
+    pub sync_pending: bool,
+    /// 本地主机共享数据变化的单调递增代际。
+    #[serde(default)]
+    pub sync_change_generation: u64,
 }
 
 /// 前端提交的 WebDAV 恢复引导凭据。
@@ -97,6 +105,8 @@ pub struct VaultSyncStatus {
     pub configured: bool,
     /// 是否已启用同步。
     pub enabled: bool,
+    /// 当前同步生命周期阶段。
+    pub phase: VaultSyncPhase,
     /// 是否已经创建或恢复过云端保险库。
     pub vault_initialized: bool,
     /// 是否已经保存 WebDAV 密码。

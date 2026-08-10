@@ -27,6 +27,7 @@ fn export_all_types() {
     TransferDirection::export_all().unwrap();
     AdapterCapability::export_all().unwrap();
     HttpScheme::export_all().unwrap();
+    VaultSyncPhase::export_all().unwrap();
 
     // 核心数据模型
     RemoteHost::export_all().unwrap();
