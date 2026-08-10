@@ -168,7 +168,7 @@ describe('portable vault and WebDAV sync', () => {
       ['pub fn reorder_hosts', '#[cfg(test)]'],
       ['pub fn delete_host', 'pub fn export_hosts'],
       ['pub fn import_hosts', null],
-    ]) {
+    ] as const) {
       const startIndex = commands.indexOf(start);
       const command = commands.slice(
         startIndex,
