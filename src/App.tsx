@@ -49,6 +49,7 @@ import {
   loadBackgroundImage,
   loadBackgroundImageBytes,
   onConnectionStatus,
+  onVaultSyncStatus,
   onDownloadBatchProgress,
   onDownloadDone,
   onDownloadProgress,
@@ -69,6 +70,7 @@ import { useConnectionStore } from './stores/connectionStore';
 import { createTransferOperationId, useBrowserStore, type PaneIndex } from './stores/browserStore';
 import { flushSettingsWrites, useSettingsStore } from './stores/settingsStore';
 import { useVaultSyncStore } from './stores/vaultSyncStore';
+import { isVaultSyncing, vaultStatusLabelKey } from './features/settings/vaultSyncStatusView';
 import { HostList } from './features/connection/HostList';
 import { Breadcrumb } from './features/browser/Breadcrumb';
 import {
@@ -941,6 +943,7 @@ function GlobalStatusBar() {
   const { panes, activePane, transfers, operationMessage, operationIsError, cancelTransfer } =
     useBrowserStore();
   const { status: vaultStatus, refreshStatus: refreshVaultStatus } = useVaultSyncStore();
+  const vaultSyncing = vaultStatus ? isVaultSyncing(vaultStatus) : false;
   useEffect(() => {
     void refreshVaultStatus();
     const refresh = () => void refreshVaultStatus();
@@ -1042,17 +1045,9 @@ function GlobalStatusBar() {
       </div>
       <div className="status-meta">
         {vaultStatus?.configured && (
-          <span className="vault-status-meta">
-            <Cloud />
-            <span>
-              {t(
-                vaultStatus.enabled
-                  ? 'settings.storage.vaultStatusActive'
-                  : vaultStatus.vaultInitialized
-                    ? 'settings.storage.vaultStatusPaused'
-                    : 'settings.storage.vaultStatusSaved',
-              )}
-            </span>
+          <span className={`vault-status-meta vault-status-meta--${vaultStatus.phase}`}>
+            {vaultSyncing ? <RefreshCw className="is-spinning" /> : <Cloud />}
+            <span>{t(vaultStatusLabelKey(vaultStatus))}</span>
             <i aria-hidden="true" />
             <time>
               {vaultStatus.lastSyncedAt
@@ -1187,6 +1182,31 @@ function AppInner() {
     startupVaultSyncHandledRef.current = true;
     if (vaultStatus.enabled) void reconcileVaultState();
   }, [reconcileVaultState, vaultStatus]);
+
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    void onVaultSyncStatus((nextStatus) => {
+      if (!active) return;
+      const previousPhase = useVaultSyncStore.getState().status?.phase;
+      useVaultSyncStore.getState().setStatus(nextStatus);
+      if (previousPhase === 'syncing' && nextStatus.phase === 'idle') {
+        void Promise.all([
+          useSettingsStore.getState().hydrateSettings(),
+          useConnectionStore.getState().refreshHosts(),
+        ]).catch(() => undefined);
+      }
+    })
+      .then((dispose) => {
+        if (active) unlisten = dispose;
+        else dispose();
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
 
   const handleSettingsClose = useCallback(() => {
     setIsSettingsOpen(false);

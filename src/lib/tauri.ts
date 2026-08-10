@@ -480,6 +480,13 @@ export async function onConnectionStatus(
   });
 }
 
+/** 监听保险库后台同步阶段变化。 */
+export async function onVaultSyncStatus(
+  callback: (payload: VaultSyncStatus) => void,
+): Promise<UnlistenFn> {
+  return listen<VaultSyncStatus>('vault:status', (event) => callback(event.payload));
+}
+
 /** 监听下载进度。 */
 export async function onDownloadProgress(
   callback: (payload: ProgressPayload) => void,

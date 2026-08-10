@@ -23,6 +23,7 @@ import { useEffect, useState } from 'react';
 import type { RemoteHost } from '../../types/generated/RemoteHost';
 import type { VaultSyncStatus } from '../../types/generated/VaultSyncStatus';
 import type { AppearanceTheme } from '../../stores/settingsStore';
+import { isVaultSyncing, vaultStatusLabelKey } from '../../features/settings/vaultSyncStatusView';
 
 interface AppTitleBarProps {
   currentHost: RemoteHost | null;
@@ -60,15 +61,8 @@ export function AppTitleBar({
 }: AppTitleBarProps) {
   const { t } = useTranslation();
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
-  const vaultStatusLabel = vaultStatus?.configured
-    ? t(
-        vaultStatus.enabled
-          ? 'settings.storage.vaultStatusActive'
-          : vaultStatus.vaultInitialized
-            ? 'settings.storage.vaultStatusPaused'
-            : 'settings.storage.vaultStatusSaved',
-      )
-    : null;
+  const vaultStatusLabel = vaultStatus?.configured ? t(vaultStatusLabelKey(vaultStatus)) : null;
+  const vaultSyncing = vaultStatus ? isVaultSyncing(vaultStatus) : false;
   const vaultSyncTime = vaultStatus?.lastSyncedAt
     ? new Date(vaultStatus.lastSyncedAt).toLocaleString()
     : t('settings.storage.vaultNever');
@@ -177,7 +171,11 @@ export function AppTitleBar({
             aria-label={`${vaultStatusLabel}, ${vaultSyncTime}`}
             title={`${vaultStatusLabel} · ${vaultSyncTime}`}
           >
-            <Cloud aria-hidden="true" />
+            {vaultSyncing ? (
+              <RefreshCw className="is-spinning" aria-hidden="true" />
+            ) : (
+              <Cloud aria-hidden="true" />
+            )}
             <span>
               <strong>{vaultStatusLabel}</strong>
               <time>{vaultSyncTime}</time>
@@ -185,7 +183,7 @@ export function AppTitleBar({
             <i
               className={
                 vaultStatus.enabled
-                  ? 'titlebar-mobile-vault-indicator titlebar-mobile-vault-indicator--active'
+                  ? `titlebar-mobile-vault-indicator titlebar-mobile-vault-indicator--active titlebar-mobile-vault-indicator--${vaultStatus.phase}`
                   : 'titlebar-mobile-vault-indicator'
               }
               aria-hidden="true"

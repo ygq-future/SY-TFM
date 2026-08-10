@@ -2258,6 +2258,14 @@ textarea,
   color: var(--accent-strong);
 }
 
+.vault-status-meta--pending svg {
+  color: var(--warning, #d79b24);
+}
+
+.vault-status-meta--failed svg {
+  color: var(--danger, #d94a5a);
+}
+
 .vault-status-meta i {
   width: 3px;
   height: 3px;
@@ -8105,6 +8113,16 @@ html[data-theme='dark'] .settings-panel {
       box-shadow:
         0 0 0 3px color-mix(in srgb, #32c875 18%, transparent),
         0 0 8px color-mix(in srgb, #32c875 42%, transparent);
+    }
+
+    .titlebar-mobile-vault-indicator--pending {
+      background: #d79b24;
+      box-shadow: 0 0 0 3px color-mix(in srgb, #d79b24 18%, transparent);
+    }
+
+    .titlebar-mobile-vault-indicator--failed {
+      background: #d94a5a;
+      box-shadow: 0 0 0 3px color-mix(in srgb, #d94a5a 18%, transparent);
     }
 
     .titlebar-separator {

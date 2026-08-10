@@ -187,6 +187,16 @@ describe('portable vault and WebDAV sync', () => {
     );
   });
 
+  it('streams backend vault phases into the global status and refreshes successful pulls', () => {
+    expect(api).toContain("listen<VaultSyncStatus>('vault:status'");
+    expect(app).toContain('onVaultSyncStatus');
+    expect(app).toMatch(
+      /onVaultSyncStatus\(\(nextStatus\) =>[\s\S]*?setStatus\(nextStatus\)[\s\S]*?previousPhase === 'syncing'[\s\S]*?nextStatus\.phase === 'idle'/,
+    );
+    expect(app).toContain('vaultStatusLabelKey(vaultStatus)');
+    expect(app).toContain('isVaultSyncing(vaultStatus)');
+  });
+
   it('keeps local portable exports as complete single-device backups', () => {
     expect(backend).toContain('build_portable_payload');
     expect(backend).toContain('capture_background_image');

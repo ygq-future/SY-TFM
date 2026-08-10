@@ -56,6 +56,8 @@ describe('AppTitleBar native permissions', () => {
     expect(source).toContain('titlebar-mobile-vault-indicator');
     expect(source).toContain('titlebar-mobile-vault-indicator--active');
     expect(source).toContain('vaultStatus.lastSyncedAt');
+    expect(source).toContain('vaultStatusLabelKey(vaultStatus)');
+    expect(source).toContain('isVaultSyncing(vaultStatus)');
     expect(app).toContain('vaultStatus={vaultStatus}');
     expect(styles).toMatch(
       /html\.mobile-platform[\s\S]*?\.titlebar-mobile-vault\s*\{[^}]*display:\s*flex/s,
