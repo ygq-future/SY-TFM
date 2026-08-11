@@ -11,20 +11,16 @@ interface VaultCloseGuard {
 /** 桌面关闭前冲刷持久化的 Vault 变化；移动端不注册窗口关闭监听。 */
 export function useVaultCloseGuard(): VaultCloseGuard {
   const [closeFailureVisible, setCloseFailureVisible] = useState(false);
-  const allowCloseRef = useRef(false);
   const flushInProgressRef = useRef(false);
 
   const cancelClose = useCallback(() => setCloseFailureVisible(false), []);
   const forceClose = useCallback(() => {
     try {
       const appWindow = getCurrentWindow();
-      allowCloseRef.current = true;
       setCloseFailureVisible(false);
-      void appWindow.close().catch(() => {
-        allowCloseRef.current = false;
-      });
+      void appWindow.destroy().catch(() => setCloseFailureVisible(true));
     } catch {
-      allowCloseRef.current = false;
+      setCloseFailureVisible(true);
     }
   }, []);
 
@@ -35,24 +31,20 @@ export function useVaultCloseGuard(): VaultCloseGuard {
     try {
       const appWindow = getCurrentWindow();
       void appWindow
-        .onCloseRequested((event) => {
-          if (allowCloseRef.current) return;
-          event.preventDefault();
-          if (flushInProgressRef.current) return;
+        .onCloseRequested(async (event) => {
+          if (flushInProgressRef.current) {
+            event.preventDefault();
+            return;
+          }
           flushInProgressRef.current = true;
-          void flushVaultSync()
-            .then(async () => {
-              if (!active) return;
-              allowCloseRef.current = true;
-              await appWindow.close();
-            })
-            .catch(() => {
-              allowCloseRef.current = false;
-              if (active) setCloseFailureVisible(true);
-            })
-            .finally(() => {
-              flushInProgressRef.current = false;
-            });
+          try {
+            await flushVaultSync();
+          } catch {
+            event.preventDefault();
+            if (active) setCloseFailureVisible(true);
+          } finally {
+            flushInProgressRef.current = false;
+          }
         })
         .then((dispose) => {
           if (active) unlisten = dispose;

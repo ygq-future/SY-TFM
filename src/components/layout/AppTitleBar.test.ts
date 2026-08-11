@@ -16,6 +16,7 @@ describe('AppTitleBar native permissions', () => {
         'core:window:allow-toggle-maximize',
         'core:window:allow-is-maximized',
         'core:window:allow-close',
+        'core:window:allow-destroy',
         'core:window:allow-start-dragging',
         'core:window:allow-set-always-on-top',
       ]),
