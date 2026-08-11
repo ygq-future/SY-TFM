@@ -17,14 +17,14 @@
 | 指标 | 值 |
 |------|-----|
 | 当前阶段 | Phase 0/1/2 已完成；Phase 3 Android 适配已启动 |
-| 当前任务 | Vault 持久同步生命周期已交付，等待 Android 与 Windows portable 人工构建验证 |
+| 当前任务 | PC 关闭权限回归已修复，等待 Windows portable 人工构建验证 |
 | 总体进度 | 文档设计 100%，Phase 0/1 完成，Phase 2 为 22/22（2 项由新版交互取代） |
 | 阻塞项 | 无；Android 首次交叉编译与调试产物已验证 |
 | 文档状态 | ✅ 需求 ✅ 架构 ✅ 接口 ✅ 数据模型 ✅ 实现计划 ✅ 进度日志 |
 
 ### 0.2 当前在做
 
-> Vault 主机同步的持久待办、实时状态、退出冲刷和原子云端替换已完成；Android 与 Windows portable 产物由用户继续构建验证。
+> Vault 持久同步与桌面安全退出已完成；Android 与 Windows portable 产物由用户继续构建验证。
 
 ### 0.3 下一步计划
 
@@ -50,6 +50,26 @@
 ## 1. 会话日志
 
 > 每次开发会话在此追加记录，最新在最上面。
+
+### Session #083 — 2026-08-11
+
+| 项目 | 内容 |
+|------|------|
+| **日期** | 2026-08-11 |
+| **类型** | PC 关闭按钮权限与生命周期回归修复 |
+| **参与者** | 用户 + AI |
+
+**已确认根因:** 注册 `getCurrentWindow().onCloseRequested` 后，当前安装的 Tauri JavaScript API 会等待处理器，并在允许关闭时通过 `window.destroy()` 完成原请求；桌面 capability 只有 `core:window:allow-close`，缺少该路径必需的 `core:window:allow-destroy`，因此同步成功后的关闭和“强制退出”最终都会被权限系统拒绝。原 hook 还提前阻止第一次请求并递归调用第二次 `close()`，既不符合 Tauri 的 awaited handler 模式，也无法绕过相同的 destroy 权限检查。
+
+**完成事项:**
+
+- 桌面 capability 增加 `core:window:allow-destroy`，并在标题栏权限测试中固定该依赖
+- 关闭监听改为 async handler，原请求内直接等待 `flushVaultSync()`；成功时不调用 `preventDefault()`，由 Tauri 完成原关闭请求，不再递归触发 `close()`
+- 同步失败或 10 秒超时时才阻止关闭并显示既有强制退出确认；用户明确强制退出时直接调用 `destroy()`，失败则保留确认框
+- 同步期间的重复关闭请求会立即 `preventDefault()`，避免第二次点击绕过尚未完成的第一次冲刷
+- 监听仍在检测到原生 `mobile-platform` 后提前返回，Android/iOS 生命周期、Vault 后端超时、持久 pending、代次保护与下次启动重试均未修改
+
+**验证:** 新增契约在修复前为 5 通过 / 3 失败，修复后专项 8/8 通过；`bun lint && bun format && bun test`（30 files / 188 tests）、`bun run build`、`cargo fmt --all -- --check`、`cargo clippy --lib -- -D warnings` 与 `cargo test --lib`（134/134）全部通过。Windows portable 与 Android 原生产物仍由用户构建验证。
 
 ### Session #082 — 2026-08-10
 
