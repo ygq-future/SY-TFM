@@ -75,6 +75,7 @@ pub fn migrate_v1_to_v3(old_path: &Path, _new_path: &Path) -> Result<AppSettings
             },
             password: lh.password,
             tags: lh.tags.unwrap_or_default(),
+            favorite_folders: Vec::new(),
             download_path: None,
             https: matches!(protocol, Protocol::WebDav),
             base_path: None,

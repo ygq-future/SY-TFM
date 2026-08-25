@@ -2,6 +2,7 @@
 
 pub mod download_request;
 pub mod editor;
+pub mod favorite_folder;
 pub mod host_dto;
 pub mod progress;
 pub mod remote_file;
@@ -13,7 +14,9 @@ pub mod vault_sync;
 pub use download_request::DownloadRequest;
 pub use editor::{
     EditorErrorPayload, EditorSessionInvalidPayload, EditorSyncedPayload, RemoteEditSessionInfo,
+    RemoteTextSnapshot,
 };
+pub use favorite_folder::FavoriteFolder;
 pub use host_dto::HostDto;
 pub use progress::{BatchProgressPayload, ConnectionStatusPayload, ProgressPayload};
 pub use remote_file::RemoteFile;

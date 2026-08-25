@@ -7,6 +7,7 @@ import {
   FilePenLine,
   FilePlus,
   FolderPlus,
+  BookmarkPlus,
   Pencil,
   RefreshCw,
   Trash2,
@@ -15,6 +16,7 @@ import type { RemoteFile } from '../../types/generated/RemoteFile';
 import { ModalPortal } from '../../components/shared/ModalPortal';
 import {
   getContextMenuPosition,
+  getFavoriteFolderTargets,
   getFileContextActions,
   type FileContextAction,
 } from './browserViewModel';
@@ -24,7 +26,8 @@ export function ContextMenu({
   x,
   y,
   file,
-  selectionCount,
+  selectedFiles,
+  currentPath,
   onClose,
   onMkdir,
   onCreateFile,
@@ -35,11 +38,13 @@ export function ContextMenu({
   onRefresh,
   onRemoteEdit,
   onOnlineEdit,
+  onAddFavorite,
 }: {
   x: number;
   y: number;
   file: RemoteFile | null;
-  selectionCount: number;
+  selectedFiles: RemoteFile[];
+  currentPath: string;
   onClose: () => void;
   onMkdir: () => void;
   onCreateFile: () => void;
@@ -50,10 +55,12 @@ export function ContextMenu({
   onRefresh: () => void;
   onRemoteEdit: () => void;
   onOnlineEdit: () => void;
+  onAddFavorite: (files: RemoteFile[]) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: x + 2, top: y + 2 });
-  const actions = getFileContextActions(file, selectionCount);
+  const actions = getFileContextActions(file, selectedFiles, currentPath);
+  const favoriteTargets = getFavoriteFolderTargets(file, selectedFiles, currentPath);
 
   useLayoutEffect(() => {
     const updatePosition = () => {
@@ -107,6 +114,7 @@ export function ContextMenu({
               const handlers: Partial<Record<FileContextAction, () => void>> = {
                 download: onDownload,
                 downloadTo: onDownloadTo,
+                favorite: () => onAddFavorite(favoriteTargets),
                 remoteEdit: onRemoteEdit,
                 onlineEdit: onOnlineEdit,
                 rename: onRename,
@@ -136,6 +144,7 @@ const menuPresentation: Record<
 > = {
   download: { icon: Download, labelKey: 'contextMenu.download' },
   downloadTo: { icon: FileDown, labelKey: 'contextMenu.downloadTo' },
+  favorite: { icon: BookmarkPlus, labelKey: 'contextMenu.addFavorite' },
   remoteEdit: { icon: FilePenLine, labelKey: 'contextMenu.remoteEdit' },
   onlineEdit: { icon: Code2, labelKey: 'contextMenu.onlineEdit' },
   rename: { icon: Pencil, labelKey: 'contextMenu.rename', shortcut: 'F2' },

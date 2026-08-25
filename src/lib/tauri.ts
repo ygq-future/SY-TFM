@@ -6,6 +6,7 @@ import type { ConnectionStatus } from '../types/enums/ConnectionStatus';
 import type { AdapterCapability } from '../types/enums/AdapterCapability';
 import type { SortColumn } from '../types/enums/SortColumn';
 import type { RemoteHost } from '../types/generated/RemoteHost';
+import type { FavoriteFolder } from '../types/generated/FavoriteFolder';
 import type { RemoteFile } from '../types/generated/RemoteFile';
 import type { AppSettings } from '../types/generated/AppSettings';
 import type { StoragePaths } from '../types/generated/StoragePaths';
@@ -14,6 +15,7 @@ import type { ConnectionStatusPayload } from '../types/generated/ConnectionStatu
 import type { ProgressPayload } from '../types/generated/ProgressPayload';
 import type { BatchProgressPayload } from '../types/generated/BatchProgressPayload';
 import type { RemoteEditSessionInfo } from '../types/generated/RemoteEditSessionInfo';
+import type { RemoteTextSnapshot } from '../types/generated/RemoteTextSnapshot';
 import type { EditorSyncedPayload } from '../types/generated/EditorSyncedPayload';
 import type { EditorErrorPayload } from '../types/generated/EditorErrorPayload';
 import type { EditorSessionInvalidPayload } from '../types/generated/EditorSessionInvalidPayload';
@@ -161,6 +163,14 @@ export async function readRemoteText(hostId: string, remotePath: string): Promis
   return invoke<string>('read_remote_text', { hostId, remotePath });
 }
 
+/** 读取远程文本及其内容版本，用于在线编辑器的外部变更检测。 */
+export async function readRemoteTextSnapshot(
+  hostId: string,
+  remotePath: string,
+): Promise<RemoteTextSnapshot> {
+  return invoke<RemoteTextSnapshot>('read_remote_text_snapshot', { hostId, remotePath });
+}
+
 /** 下载到受管临时目录并建立外部编辑器同步监听。 */
 export async function startRemoteEdit(
   hostId: string,
@@ -178,6 +188,25 @@ export async function listRemoteEditSessions(hostId: string): Promise<RemoteEdit
 /** 停止外部编辑器同步监听并清理临时文件。 */
 export async function stopRemoteEdit(editSessionId: string): Promise<boolean> {
   return invoke<boolean>('stop_remote_edit', { editSessionId });
+}
+
+/** 仅在远程版本未变化时保存在线编辑内容。 */
+export async function uploadRemoteTextIfUnchanged(
+  hostId: string,
+  remotePath: string,
+  content: string,
+  expectedRevision: string,
+  operationId: string,
+): Promise<RemoteTextSnapshot> {
+  return invoke<RemoteTextSnapshot>('upload_remote_text_if_unchanged', {
+    request: {
+      hostId,
+      remotePath,
+      content,
+      expectedRevision,
+      operationId,
+    },
+  });
 }
 
 // ============================================================
@@ -445,6 +474,14 @@ export async function setFontSize(fontSize: number): Promise<void> {
 /** 获取主机列表。 */
 export async function getHosts(): Promise<RemoteHost[]> {
   return invoke<RemoteHost[]>('get_hosts');
+}
+
+/** 将远程文件夹加入指定主机的收藏列表。 */
+export async function addFavoriteFolders(
+  hostId: string,
+  folders: FavoriteFolder[],
+): Promise<FavoriteFolder[]> {
+  return invoke<FavoriteFolder[]>('add_favorite_folders', { hostId, folders });
 }
 
 /** 保存主机（新增/更新）。 */

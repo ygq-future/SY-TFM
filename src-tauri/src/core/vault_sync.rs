@@ -1598,6 +1598,7 @@ async fn connect_webdav(
         username: credentials.username.clone(),
         password: String::new(),
         tags: String::new(),
+        favorite_folders: Vec::new(),
         download_path: None,
         https: !raw_url.to_ascii_lowercase().starts_with("http://"),
         base_path: None,
@@ -1908,6 +1909,7 @@ fn invalid_backup_error(error: impl std::fmt::Display) -> AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::FavoriteFolder;
 
     struct RecordingTransport {
         operations: StdMutex<Vec<String>>,
@@ -2164,6 +2166,7 @@ mod tests {
             username: "alice".to_string(),
             password: "plain-secret".to_string(),
             tags: String::new(),
+            favorite_folders: Vec::new(),
             download_path: Some("C:/Host".to_string()),
             https: true,
             base_path: None,
@@ -2464,6 +2467,30 @@ mod tests {
     }
 
     #[test]
+    fn cloud_host_payload_round_trips_favorite_folders() {
+        let mut host = sample_host("favorite-host");
+        host.favorite_folders.push(FavoriteFolder {
+            name: "deploy".to_string(),
+            path: "/srv/deploy".to_string(),
+        });
+        let payload = CloudVaultPayload {
+            schema_version: VaultPolicy::CloudPayloadSchemaVersion.value(),
+            hosts: vec![host],
+            platforms: Vec::new(),
+        };
+        let serialized = serde_json::to_vec(&payload).expect("serialize cloud payload");
+        let decoded = parse_cloud_payload(&serialized).expect("decode cloud payload");
+
+        assert_eq!(
+            decoded.hosts[0].favorite_folders,
+            vec![FavoriteFolder {
+                name: "deploy".to_string(),
+                path: "/srv/deploy".to_string(),
+            }]
+        );
+    }
+
+    #[test]
     fn legacy_cloud_payload_migrates_only_provably_shared_hosts() {
         let legacy = PortableVaultPayload {
             schema_version: VaultPolicy::PortablePayloadSchemaVersion.value(),
@@ -2711,6 +2738,7 @@ mod tests {
             username: "alice".to_string(),
             password: "plain-secret".to_string(),
             tags: String::new(),
+            favorite_folders: Vec::new(),
             download_path: None,
             https: true,
             base_path: None,

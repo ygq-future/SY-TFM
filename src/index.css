@@ -5438,6 +5438,152 @@ textarea,
   height: 14px;
 }
 
+.favorite-folders {
+  position: relative;
+  display: flex;
+}
+
+.favorite-folders > button[aria-expanded='true'] {
+  border-color: var(--accent-glow);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.favorite-folders-menu {
+  position: fixed;
+  z-index: 160;
+  width: min(320px, calc(100vw - 16px));
+  max-height: min(420px, calc(100vh - 20px));
+  overflow: hidden;
+  border: 1px solid var(--glass-line);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--modal-surface) 96%, var(--accent) 4%);
+  padding: 5px;
+  box-shadow: 0 18px 42px rgba(7, 10, 20, 0.24);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.25);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.25);
+  animation: glass-rise 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.favorite-folders-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 7px 7px;
+  color: var(--app-ink);
+  font-size: var(--type-label-size);
+  font-weight: 730;
+}
+
+.favorite-folders-heading small {
+  overflow: hidden;
+  color: var(--accent-strong);
+  font-size: var(--type-caption-size);
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.favorite-folders-list {
+  display: grid;
+  max-height: min(350px, calc(100vh - 85px));
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.favorite-folder-option {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 18px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  padding: 7px;
+  color: var(--app-ink);
+  text-align: left;
+  transition: 130ms ease;
+}
+
+.favorite-folder-option:hover,
+.favorite-folder-option:focus-visible {
+  background: color-mix(in srgb, var(--accent) 18%, var(--modal-control));
+  color: var(--accent-strong);
+}
+
+.favorite-folder-option > svg {
+  width: 14px;
+  height: 14px;
+  color: var(--accent-strong);
+}
+
+.favorite-folder-option > svg:last-child {
+  width: 11px;
+  height: 11px;
+  color: var(--app-subtle);
+}
+
+.favorite-folder-option > span {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.favorite-folder-option strong,
+.favorite-folder-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.favorite-folder-option small {
+  color: var(--app-muted);
+  font-size: var(--type-caption-size);
+}
+
+.favorite-folders-state {
+  padding: 17px 9px 19px;
+  color: var(--app-muted);
+  font-size: var(--type-caption-size);
+  text-align: center;
+}
+
+.favorite-folder-add {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  border: 1px solid var(--accent-glow);
+  border-radius: 7px;
+  background: var(--accent-soft);
+  margin: 0 0 4px;
+  padding: 7px;
+  color: var(--accent-strong);
+  text-align: left;
+  font-weight: 680;
+}
+
+.favorite-folder-add:hover,
+.favorite-folder-add:focus-visible {
+  background: color-mix(in srgb, var(--accent) 24%, var(--modal-control));
+}
+
+.favorite-folder-add > svg {
+  width: 14px;
+  height: 14px;
+}
+
+.favorite-folder-add > small {
+  color: var(--app-muted);
+  font-size: var(--type-caption-size);
+}
+
 .remote-edit-sessions {
   position: relative;
   display: flex;
@@ -5932,8 +6078,29 @@ textarea,
 }
 
 .global-status-bar {
-  grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.4fr) minmax(150px, 1fr);
+  grid-template-columns: minmax(220px, 1fr) minmax(270px, 1.1fr) minmax(300px, 1.4fr);
   font-size: var(--ui-font-caption);
+}
+
+@media (min-width: 721px) {
+  html:not(.mobile-platform) .global-status-bar:has(.transfer-status--visible) {
+    grid-template-columns: minmax(150px, 0.7fr) minmax(420px, 1.4fr) minmax(300px, 1.1fr);
+  }
+}
+
+/* Keep the sync label readable while giving the transfer task the open space on the left. */
+.transfer-status {
+  justify-content: flex-start;
+}
+
+.status-meta > .vault-status-meta {
+  flex: 0 0 auto;
+}
+
+.vault-status-meta > span:first-of-type {
+  flex: 0 0 auto;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .transfer-status {
@@ -5961,6 +6128,7 @@ textarea,
 
 .status-progress-track {
   width: min(110px, 18vw);
+  flex: 0 0 auto;
   height: 3px;
   overflow: hidden;
   border-radius: 99px;
@@ -5976,6 +6144,7 @@ textarea,
 }
 
 .transfer-status strong {
+  flex: 0 0 auto;
   color: var(--app-ink);
   font-size: inherit;
   font-weight: 680;
@@ -7515,8 +7684,8 @@ html[data-theme='dark'] .settings-panel {
   position: relative;
   display: flex;
   min-width: 0;
-  max-width: 520px;
-  flex: 0 1 auto;
+  max-width: 100%;
+  flex: 1 1 auto;
   align-items: center;
   gap: 5px;
   border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--glass-line-soft));
@@ -7526,9 +7695,10 @@ html[data-theme='dark'] .settings-panel {
 }
 
 .transfer-task-message {
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
-  min-width: 44px;
-  max-width: 150px;
+  max-width: none;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -7612,12 +7782,21 @@ html[data-theme='dark'] .settings-panel {
   animation: editor-backdrop-in 150ms ease-out;
 }
 
+.online-editor-backdrop--windowed {
+  inset: 0;
+  padding: 0;
+  background: transparent;
+  -webkit-backdrop-filter: blur(var(--glass-blur, 22px)) saturate(1.12);
+  backdrop-filter: blur(var(--glass-blur, 22px)) saturate(1.12);
+  animation: none;
+}
+
 .online-editor {
   display: grid;
   width: min(1080px, 96vw);
   height: min(760px, calc(100vh - 86px));
   min-height: 360px;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--glass-line));
   border-radius: 14px;
@@ -7627,6 +7806,91 @@ html[data-theme='dark'] .settings-panel {
     inset 0 1px color-mix(in srgb, #fff 14%, transparent);
   backdrop-filter: blur(var(--glass-blur));
   animation: editor-surface-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.online-editor-backdrop--windowed .online-editor {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  animation: none;
+}
+
+.online-editor-windowbar {
+  min-height: 56px;
+  border-bottom-color: var(--glass-line-soft);
+  background: color-mix(in srgb, var(--glass-bg) 92%, transparent);
+  box-shadow: inset 0 1px 0 var(--glass-line);
+}
+
+.online-editor-windowbar .online-editor-identity {
+  max-width: min(42vw, 520px);
+}
+
+.online-editor-titlebar-drag-zone {
+  flex: 1 1 auto;
+  align-self: stretch;
+  min-width: 24px;
+  cursor: grab;
+}
+
+.online-editor-titlebar-drag-zone:active {
+  cursor: grabbing;
+}
+
+.online-editor-window-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--glass-line-soft);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--glass-bg-muted) 78%, transparent);
+  padding: 2px;
+}
+
+.online-editor-window-control {
+  display: grid;
+  width: 28px;
+  height: 26px;
+  place-items: center;
+  cursor: pointer;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--app-muted);
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+}
+
+.online-editor-window-control:hover,
+.online-editor-window-control:focus-visible {
+  background: color-mix(in srgb, var(--glass-line) 72%, transparent);
+  color: var(--app-ink);
+  outline: none;
+}
+
+.online-editor-window-control svg {
+  width: 14px;
+  height: 14px;
+}
+
+.online-editor-windowbar .online-editor-close {
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--app-muted);
+}
+
+.online-editor-windowbar .online-editor-close:hover,
+.online-editor-windowbar .online-editor-close:focus-visible {
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+  outline: none;
 }
 
 .online-editor-header,
@@ -7753,6 +8017,321 @@ html[data-theme='dark'] .settings-panel {
   background: color-mix(in srgb, var(--app-bg) 86%, transparent);
 }
 
+.online-editor-conflict-slot {
+  min-height: 0;
+}
+
+.online-editor-conflict {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--warning, #efb34d) 32%, transparent);
+  background: color-mix(in srgb, var(--warning, #efb34d) 11%, var(--glass-bg-strong));
+  color: var(--app-text);
+  padding: 9px 14px;
+}
+
+.online-editor-conflict-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.online-editor-conflict-copy strong {
+  color: var(--warning-strong, #d9982f);
+  font-size: var(--type-label-size);
+}
+
+.online-editor-conflict-copy span {
+  overflow: hidden;
+  color: var(--app-muted);
+  font-size: var(--type-caption-size);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.online-editor-conflict-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.online-editor-conflict-actions button {
+  cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--warning, #efb34d) 36%, var(--glass-line));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--glass-bg) 80%, transparent);
+  color: var(--app-text);
+  font-size: var(--type-caption-size);
+  padding: 5px 9px;
+  transition: 140ms ease;
+}
+
+.online-editor-conflict-actions button:hover,
+.online-editor-conflict-actions button:focus-visible {
+  border-color: var(--warning, #efb34d);
+  background: color-mix(in srgb, var(--warning, #efb34d) 16%, var(--glass-bg));
+  color: var(--warning-strong, #d9982f);
+}
+
+.online-editor-remote-notice {
+  overflow: hidden;
+  color: var(--warning-strong, #d9982f);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* CodeMirror's default find bar is functional but visually disconnected from the editor. */
+.online-editor-body .cm-panels {
+  z-index: 2;
+  border-color: var(--glass-line-soft);
+  background: color-mix(in srgb, var(--glass-bg-strong) 96%, transparent);
+  box-shadow: 0 8px 20px color-mix(in srgb, #000 12%, transparent);
+}
+
+.online-editor-body .cm-panels-top {
+  border-bottom-width: 1px;
+}
+
+.online-editor-body .cm-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px 9px;
+  min-height: 48px;
+  padding: 8px 12px;
+  color: var(--app-muted);
+}
+
+.online-editor-body .cm-search label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  color: var(--app-muted);
+  font-size: var(--type-caption-size);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.online-editor-body .cm-search > label:first-child {
+  flex: 1 1 220px;
+}
+
+.online-editor-body .cm-search > label:not(:first-child) {
+  border: 1px solid var(--glass-line-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--glass-bg-muted) 72%, transparent);
+  padding: 0 8px;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    color 140ms ease;
+}
+
+.online-editor-body .cm-search > label:not(:first-child):has(input:checked) {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--glass-line-soft));
+  background: color-mix(in srgb, var(--accent-soft) 72%, transparent);
+  color: var(--accent-strong);
+}
+
+.online-editor-body .cm-search .cm-textfield {
+  width: min(30vw, 320px);
+  flex: 1 1 auto;
+  height: 30px;
+  border: 1px solid var(--glass-line);
+  border-radius: 7px;
+  outline: none;
+  background: color-mix(in srgb, var(--app-bg) 72%, transparent);
+  color: var(--app-text);
+  font: inherit;
+  padding: 0 9px;
+  transition: 140ms ease;
+}
+
+.online-editor-body .cm-search .cm-textfield:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.online-editor-body .cm-search input[type='checkbox'] {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  flex: 0 0 auto;
+  appearance: none;
+  cursor: pointer;
+  border: 1px solid var(--glass-line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--app-muted) 28%, transparent);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, #000 18%, transparent);
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.online-editor-body .cm-search input[type='checkbox']::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--app-ink);
+  box-shadow: 0 1px 3px color-mix(in srgb, #000 26%, transparent);
+  content: '';
+  transition: transform 140ms ease;
+}
+
+.online-editor-body .cm-search input[type='checkbox']:checked {
+  border-color: color-mix(in srgb, var(--accent) 72%, transparent);
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.online-editor-body .cm-search input[type='checkbox']:checked::after {
+  background: var(--accent-contrast);
+  transform: translateX(14px);
+}
+
+.online-editor-body .cm-search input[type='checkbox']:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.online-editor-body .cm-search .cm-button {
+  min-width: 30px;
+  height: 30px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--app-muted);
+  font: inherit;
+  padding: 0 7px;
+  transition: 140ms ease;
+}
+
+.online-editor-body .cm-search .cm-button:hover,
+.online-editor-body .cm-search .cm-button:focus-visible {
+  border-color: var(--glass-line);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent-strong);
+}
+
+.online-editor-body .cm-search [name='close'] {
+  margin-left: 2px;
+  color: var(--app-muted);
+}
+
+.online-editor-body .cm-search br {
+  display: none;
+}
+
+.editor-window,
+.editor-window body,
+.editor-window #root {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+.editor-window {
+  background: transparent;
+  color: var(--app-ink);
+}
+
+.editor-window body {
+  background: transparent;
+}
+
+.editor-window-shell {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: transparent;
+}
+
+/* Keep the editor's own background blurred before the async document surface mounts. */
+.editor-window-shell::before {
+  filter: blur(var(--glass-blur, 22px)) saturate(1.12);
+  transform: scale(1.08);
+}
+
+.editor-window-loading,
+.editor-window-error {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  background: color-mix(in srgb, var(--glass-bg-strong) var(--glass-opacity-percent), transparent);
+  color: var(--app-text);
+  padding: 24px;
+  text-align: center;
+  -webkit-backdrop-filter: blur(var(--glass-blur, 22px)) saturate(1.12);
+  backdrop-filter: blur(var(--glass-blur, 22px)) saturate(1.12);
+}
+
+.editor-window-loading svg {
+  width: 24px;
+  height: 24px;
+  color: var(--accent-strong);
+}
+
+.editor-window-loading .icon-button {
+  margin-top: 4px;
+}
+
+.editor-window-error-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 11px;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.editor-window-error-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.editor-window-error h1 {
+  margin: 0;
+  font-size: var(--type-heading-size);
+}
+
+.editor-window-error p {
+  max-width: 520px;
+  margin: 0;
+  color: var(--app-muted);
+  font-size: var(--type-body-size);
+}
+
+.editor-window-error button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  border: 1px solid var(--glass-line);
+  border-radius: 8px;
+  background: var(--glass-bg-strong);
+  color: var(--app-text);
+  padding: 7px 11px;
+}
+
+.editor-window-error button svg {
+  width: 14px;
+  height: 14px;
+}
+
 .online-editor-codemirror {
   height: 100%;
   min-height: 0;
@@ -7866,6 +8445,20 @@ html[data-theme='dark'] .settings-panel {
 
   .online-editor-language {
     display: none;
+  }
+
+  .online-editor-conflict {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .online-editor-conflict-copy span {
+    white-space: normal;
+  }
+
+  .online-editor-conflict-actions button {
+    flex: 1 1 auto;
   }
 
   .online-editor-identity span:not(.online-editor-file-icon) {

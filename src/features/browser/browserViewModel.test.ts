@@ -8,6 +8,8 @@ import {
   calculateTransferPercent,
   getParentRemotePath,
   getContextMenuPosition,
+  canAddFavoriteFolder,
+  getFavoriteFolderTargets,
   getFileContextActions,
   formatRemoteModified,
   isEditableTextFile,
@@ -59,8 +61,40 @@ describe('browser view model', () => {
     ]);
     expect(getFileContextActions(file(true))).not.toContain('remoteEdit');
     expect(getFileContextActions(file(true))).not.toContain('onlineEdit');
-    expect(getFileContextActions(file(false), 2)).not.toContain('rename');
+    expect(getFileContextActions(file(true))).toContain('favorite');
+    expect(getFileContextActions(file(false), [file(false), file(true)])).not.toContain('rename');
     expect(getFileContextActions(null)).toEqual(['refresh', 'mkdir', 'createFile']);
+    expect(getFileContextActions(null, [], '/home/deploy')).toEqual([
+      'favorite',
+      'refresh',
+      'mkdir',
+      'createFile',
+    ]);
+    expect(getFileContextActions(null, [file(true)])).toEqual([
+      'favorite',
+      'refresh',
+      'mkdir',
+      'createFile',
+    ]);
+  });
+
+  it('only exposes favorites for pure directory selections', () => {
+    const folderA = file(true);
+    const folderB = { ...folderA, name: 'archive', fullPath: '/archive' };
+    const textFile = file(false);
+
+    expect(canAddFavoriteFolder(folderA, [folderA])).toBe(true);
+    expect(canAddFavoriteFolder(folderA, [folderA, folderB])).toBe(true);
+    expect(canAddFavoriteFolder(textFile, [textFile])).toBe(false);
+    expect(canAddFavoriteFolder(folderA, [folderA, textFile])).toBe(false);
+    expect(canAddFavoriteFolder(null, [])).toBe(false);
+    expect(canAddFavoriteFolder(null, [folderA, folderB])).toBe(true);
+    expect(getFavoriteFolderTargets(folderA, [folderA, folderB])).toEqual([folderA, folderB]);
+    expect(getFavoriteFolderTargets(null, [], '/home/deploy')).toMatchObject([
+      { name: 'deploy', fullPath: '/home/deploy', isDirectory: true },
+    ]);
+    expect(getFileContextActions(folderA, [folderA, textFile])).not.toContain('favorite');
+    expect(getFileContextActions(textFile, [textFile])).not.toContain('favorite');
   });
 
   it('collapses only the middle of a long path and keeps every hidden level navigable', () => {

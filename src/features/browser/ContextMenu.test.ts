@@ -17,6 +17,15 @@ describe('file context menu positioning', () => {
     expect(source).not.toContain('onUnavailable');
   });
 
+  it('routes the folder-only favorite action with the full selection', () => {
+    const source = readFileSync(new URL('./ContextMenu.tsx', import.meta.url), 'utf8');
+    expect(source).toContain('selectedFiles');
+    expect(source).toContain('currentPath');
+    expect(source).toContain('getFavoriteFolderTargets');
+    expect(source).toContain('onAddFavorite(favoriteTargets)');
+    expect(source).toContain("labelKey: 'contextMenu.addFavorite'");
+  });
+
   it('exposes native desktop shortcut hints for rename and delete', () => {
     const source = readFileSync(new URL('./ContextMenu.tsx', import.meta.url), 'utf8');
     expect(source).toContain("shortcut: 'F2'");

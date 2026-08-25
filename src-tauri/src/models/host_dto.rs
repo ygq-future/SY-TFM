@@ -3,6 +3,8 @@ use ts_rs::TS;
 
 use crate::enums::Protocol;
 
+use super::FavoriteFolder;
+
 /// 主机传输对象（用于配置导入/导出，绕过机器特定加密）。
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/types/generated/")]
@@ -23,6 +25,9 @@ pub struct HostDto {
     pub password: Option<String>,
     /// 标签
     pub tags: String,
+    /// 该主机的收藏文件夹列表。
+    #[serde(default)]
+    pub favorite_folders: Vec<FavoriteFolder>,
     /// 下载路径覆盖
     pub download_path: Option<String>,
     /// 是否使用 HTTPS
@@ -45,6 +50,7 @@ impl From<crate::models::RemoteHost> for HostDto {
                 Some("[PROTECTED]".to_string())
             },
             tags: h.tags,
+            favorite_folders: h.favorite_folders,
             download_path: h.download_path,
             https: h.https,
             base_path: h.base_path,
@@ -70,6 +76,7 @@ mod tests {
             username: "alice".to_string(),
             password: String::new(),
             tags: String::new(),
+            favorite_folders: Vec::new(),
             download_path: None,
             https: true,
             base_path: None,

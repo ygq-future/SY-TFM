@@ -4,6 +4,8 @@ use uuid::Uuid;
 
 use crate::enums::Protocol;
 
+use super::favorite_folder::FavoriteFolder;
+
 /// 远程主机配置（替代旧版 FtpHost，支持多种协议）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/types/generated/")]
@@ -30,6 +32,9 @@ pub struct RemoteHost {
     /// 标签（逗号分隔字符串，如 "prod,web,server1"）
     #[serde(default)]
     pub tags: String,
+    /// 该主机独立维护的收藏文件夹列表。
+    #[serde(default)]
+    pub favorite_folders: Vec<FavoriteFolder>,
     /// 每主机下载路径覆盖（null = 使用全局默认）
     #[serde(default)]
     pub download_path: Option<String>,
@@ -86,6 +91,7 @@ impl RemoteHost {
             username: self.username.clone(),
             password: self.password.clone(),
             tags: self.tags.clone(),
+            favorite_folders: Vec::new(),
             download_path: self.download_path.clone(),
             https: self.https,
             base_path: self.base_path.clone(),
@@ -118,6 +124,7 @@ mod tests {
             username: "alice".to_string(),
             password: String::new(),
             tags: String::new(),
+            favorite_folders: Vec::new(),
             download_path: None,
             https: true,
             base_path: None,
@@ -131,14 +138,20 @@ mod tests {
         let value = serde_json::to_value(sample_host()).expect("serialize host");
         let mut object = value.as_object().expect("host object").clone();
         object.remove("sftpHostKeyFingerprint");
+        object.remove("favoriteFolders");
         let decoded: RemoteHost = serde_json::from_value(serde_json::Value::Object(object))
             .expect("deserialize old host");
         assert_eq!(decoded.sftp_host_key_fingerprint, None);
+        assert!(decoded.favorite_folders.is_empty());
     }
 
     #[test]
     fn fingerprint_round_trips_but_clone_forgets_trust() {
-        let host = sample_host();
+        let mut host = sample_host();
+        host.favorite_folders.push(super::FavoriteFolder {
+            name: "docs".to_string(),
+            path: "/docs".to_string(),
+        });
         let decoded: RemoteHost =
             serde_json::from_value(serde_json::to_value(&host).expect("serialize host"))
                 .expect("deserialize host");
@@ -146,6 +159,8 @@ mod tests {
             decoded.sftp_host_key_fingerprint.as_deref(),
             Some("SHA256:trusted")
         );
-        assert_eq!(host.clone_config().sftp_host_key_fingerprint, None);
+        let cloned = host.clone_config();
+        assert_eq!(cloned.sftp_host_key_fingerprint, None);
+        assert!(cloned.favorite_folders.is_empty());
     }
 }

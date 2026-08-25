@@ -7,6 +7,7 @@ pub mod adapter_capability;
 pub(crate) mod app_directory;
 pub(crate) mod app_event;
 pub(crate) mod app_file;
+pub mod app_window;
 pub(crate) mod connection_policy;
 pub mod connection_status;
 pub mod edit_mode;
@@ -28,6 +29,7 @@ pub mod vault_sync_phase;
 pub(crate) mod webdav_depth;
 
 pub use adapter_capability::AdapterCapability;
+pub use app_window::AppWindow;
 pub use connection_status::ConnectionStatus;
 pub use edit_mode::EditMode;
 pub use error_code::ErrorCode;

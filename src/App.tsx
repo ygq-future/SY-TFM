@@ -58,11 +58,12 @@ import {
   onEditorError,
   onEditorSessionInvalid,
   onEditorSynced,
-  readRemoteText,
+  readRemoteTextSnapshot,
   syncVaultNow,
   startRemoteEdit,
   uploadFile,
   uploadContent,
+  uploadRemoteTextIfUnchanged,
 } from './lib/tauri';
 import type { RemoteFile } from './types/generated/RemoteFile';
 import type { RemoteEditSessionInfo } from './types/generated/RemoteEditSessionInfo';
@@ -82,6 +83,7 @@ import {
 } from './features/browser/FileList';
 import { UploadZone } from './features/browser/UploadZone';
 import { ContextMenu } from './features/browser/ContextMenu';
+import { FavoriteFoldersMenu } from './features/browser/FavoriteFoldersMenu';
 import { PaneHostSelect } from './features/browser/PaneHostSelect';
 import { RemoteEditSessionsMenu } from './features/editor/RemoteEditSessionsMenu';
 import { SettingsDialog } from './features/settings/SettingsDialog';
@@ -90,6 +92,7 @@ import { ToastProvider } from './components/shared/ToastProvider';
 import { AppTitleBar } from './components/layout/AppTitleBar';
 import { formatAppError } from './lib/errors';
 import { pickDirectory } from './lib/dialog';
+import { MOBILE_EXIT_CONFIRMATION_WINDOW_MS } from './lib/mobileExitGuard';
 import {
   calculateTransferPercent,
   isEditableTextFile,
@@ -100,6 +103,7 @@ import { ModalPortal } from './components/shared/ModalPortal';
 import i18n from './lib/i18n';
 import { activateHostInPane, collapseToSinglePane, reconcilePaneHosts } from './lib/paneAssignment';
 import { cn } from './lib/utils';
+import { openEditorWindow } from './features/editor/editorWindowLauncher';
 import { hasActiveAppOverlay } from './lib/overlayInteraction';
 import {
   MOBILE_DIRECTORY_OVERLAP_THRESHOLD,
@@ -151,7 +155,7 @@ function BrowserPage({ paneIndex, hostId, onHostChange }: BrowserPageProps) {
     createDirectory,
     createFile,
   } = useBrowserStore();
-  const { hostCapabilities, hosts } = useConnectionStore();
+  const { hostCapabilities, hosts, addFavoriteFolders: saveFavoriteFolders } = useConnectionStore();
   const activeCapability = hostCapabilities[hostId] ?? null;
   const defaultDownloadPath = useSettingsStore((state) => state.defaultDownloadPath);
   const activeHost = hosts.find((host) => host.id === hostId) ?? null;
@@ -163,6 +167,7 @@ function BrowserPage({ paneIndex, hostId, onHostChange }: BrowserPageProps) {
   const [onlineEditor, setOnlineEditor] = useState<{
     file: RemoteFile;
     content: string;
+    revision: string;
   } | null>(null);
   const editorOperationMessageRef = useRef<string | null>(null);
   const onlineEditorGenerationRef = useRef(0);
@@ -241,11 +246,15 @@ function BrowserPage({ paneIndex, hostId, onHostChange }: BrowserPageProps) {
     [hostId, navigateToPath, paneIndex],
   );
 
-  const handleContextMenu = useCallback((event: React.MouseEvent, file: RemoteFile | null) => {
-    event.preventDefault();
-    if (document.documentElement.classList.contains('mobile-platform')) return;
-    setContextMenu({ x: event.clientX, y: event.clientY, file });
-  }, []);
+  const handleContextMenu = useCallback(
+    (event: React.MouseEvent, file: RemoteFile | null) => {
+      event.preventDefault();
+      if (document.documentElement.classList.contains('mobile-platform')) return;
+      if (file === null) selectFiles(paneIndex, []);
+      setContextMenu({ x: event.clientX, y: event.clientY, file });
+    },
+    [paneIndex, selectFiles],
+  );
 
   const handleDownload = useCallback(async () => {
     try {
@@ -277,10 +286,25 @@ function BrowserPage({ paneIndex, hostId, onHostChange }: BrowserPageProps) {
     async (file: RemoteFile) => {
       const editorGeneration = ++onlineEditorGenerationRef.current;
       setEditorOperationMessage(t('editor.opening', { name: file.name }));
+      if (!document.documentElement.classList.contains('mobile-platform')) {
+        try {
+          await openEditorWindow(hostId, file.fullPath, file.name);
+          if (onlineEditorGenerationRef.current === editorGeneration) {
+            setEditorOperationMessage(t('editor.openedInWindow', { name: file.name }));
+          }
+        } catch (error) {
+          if (onlineEditorGenerationRef.current !== editorGeneration) return;
+          setEditorOperationMessage(
+            t('editor.openFailed', { name: file.name, error: formatAppError(error) }),
+            true,
+          );
+        }
+        return;
+      }
       try {
-        const content = await readRemoteText(hostId, file.fullPath);
+        const snapshot = await readRemoteTextSnapshot(hostId, file.fullPath);
         if (onlineEditorGenerationRef.current !== editorGeneration) return;
-        setOnlineEditor({ file, content });
+        setOnlineEditor({ file, content: snapshot.content, revision: snapshot.revision });
         setEditorOperationMessage(t('editor.openedOnline', { name: file.name }));
       } catch (error) {
         if (onlineEditorGenerationRef.current !== editorGeneration) return;
@@ -339,6 +363,23 @@ function BrowserPage({ paneIndex, hostId, onHostChange }: BrowserPageProps) {
       setOperationMessage(t('browser.deleteFailed', { error: formatAppError(error) }), true);
     }
   }, [deleteSelected, hostId, paneIndex, setOperationMessage, t]);
+
+  const handleAddFavorite = useCallback(
+    async (files: RemoteFile[]) => {
+      const folders = files.filter((file) => file.isDirectory && file.name !== '..');
+      if (folders.length === 0 || folders.length !== files.length) return;
+      try {
+        await saveFavoriteFolders(
+          hostId,
+          folders.map((folder) => ({ name: folder.name, path: folder.fullPath })),
+        );
+        setOperationMessage(t('browser.favoriteAdded'));
+      } catch (error) {
+        setOperationMessage(t('browser.favoriteAddFailed', { error: formatAppError(error) }), true);
+      }
+    },
+    [hostId, saveFavoriteFolders, setOperationMessage, t],
+  );
 
   const handlePickedFiles = useCallback(
     async (pickedFiles: File[]) => {
@@ -541,6 +582,10 @@ function BrowserPage({ paneIndex, hostId, onHostChange }: BrowserPageProps) {
           />
         </div>
         <div className="path-actions">
+          <FavoriteFoldersMenu
+            hostId={hostId}
+            onNavigate={(path) => void navigateToPath(paneIndex, hostId, path)}
+          />
           <button
             className="icon-button"
             type="button"
@@ -610,6 +655,22 @@ function BrowserPage({ paneIndex, hostId, onHostChange }: BrowserPageProps) {
           aria-label={t('browser.selectionActions')}
           data-drawer-gesture="exclude"
         >
+          <FavoriteFoldersMenu
+            hostId={hostId}
+            mobile
+            selectedFiles={pane.selectedFiles}
+            onAddFavorite={(files) => void handleAddFavorite(files)}
+            onNavigate={(path) => void navigateToPath(paneIndex, hostId, path)}
+          />
+          <button
+            className="mobile-file-action mobile-home-action"
+            type="button"
+            disabled={pane.isLoading}
+            onClick={() => void navigateToPath(paneIndex, hostId, pane.homePath)}
+          >
+            <Home />
+            <span>{t('browser.homeAction')}</span>
+          </button>
           <button
             className="mobile-file-action mobile-refresh-action"
             type="button"
@@ -726,7 +787,8 @@ function BrowserPage({ paneIndex, hostId, onHostChange }: BrowserPageProps) {
           x={contextMenu.x}
           y={contextMenu.y}
           file={contextMenu.file}
-          selectionCount={pane.selectedFiles.length}
+          selectedFiles={pane.selectedFiles}
+          currentPath={pane.currentPath}
           onClose={() => setContextMenu(null)}
           onMkdir={() => setDialog({ type: 'mkdir' })}
           onCreateFile={() => setDialog({ type: 'createFile' })}
@@ -737,6 +799,7 @@ function BrowserPage({ paneIndex, hostId, onHostChange }: BrowserPageProps) {
           onRefresh={() => void refresh(paneIndex, hostId)}
           onRemoteEdit={() => contextMenu.file && void handleRemoteEdit(contextMenu.file)}
           onOnlineEdit={() => contextMenu.file && void handleOnlineEdit(contextMenu.file)}
+          onAddFavorite={(files) => void handleAddFavorite(files)}
         />
       )}
 
@@ -746,18 +809,26 @@ function BrowserPage({ paneIndex, hostId, onHostChange }: BrowserPageProps) {
             fileName={onlineEditor.file.name}
             remotePath={onlineEditor.file.fullPath}
             initialContent={onlineEditor.content}
+            initialRevision={onlineEditor.revision}
+            hostId={hostId}
             onClose={() => {
               onlineEditorGenerationRef.current += 1;
               setOnlineEditor(null);
               clearEditorOperationMessage();
             }}
-            onSave={async (content) => {
+            onSave={async (content, expectedRevision) => {
               const editorGeneration = onlineEditorGenerationRef.current;
               const operationId = createTransferOperationId('localToRemote');
               setEditorOperationMessage(t('editor.syncing', { name: onlineEditor.file.name }));
               try {
                 await beginTransfer(operationId, [hostId]);
-                await uploadContent(hostId, onlineEditor.file.fullPath, content, operationId);
+                const snapshot = await uploadRemoteTextIfUnchanged(
+                  hostId,
+                  onlineEditor.file.fullPath,
+                  content,
+                  expectedRevision,
+                  operationId,
+                );
                 const syncTime = new Date().toLocaleTimeString([], { hour12: false });
                 if (onlineEditorGenerationRef.current === editorGeneration) {
                   setEditorOperationMessage(
@@ -765,7 +836,7 @@ function BrowserPage({ paneIndex, hostId, onHostChange }: BrowserPageProps) {
                   );
                 }
                 await refresh(paneIndex, hostId);
-                return syncTime;
+                return snapshot;
               } catch (error) {
                 if (onlineEditorGenerationRef.current === editorGeneration) {
                   setEditorOperationMessage(
@@ -1163,6 +1234,24 @@ function AppInner() {
     useSensor(PlatformPointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 320, tolerance: 8 } }),
   );
+
+  useEffect(() => {
+    let clearTimer: number | null = null;
+    const showExitConfirmation = () => {
+      const message = t('browser.pressBackAgain');
+      setOperationMessage(message);
+      if (clearTimer !== null) window.clearTimeout(clearTimer);
+      clearTimer = window.setTimeout(() => {
+        clearOperationMessage(message);
+        clearTimer = null;
+      }, MOBILE_EXIT_CONFIRMATION_WINDOW_MS);
+    };
+    window.addEventListener('mobile-back-confirmation-needed', showExitConfirmation);
+    return () => {
+      window.removeEventListener('mobile-back-confirmation-needed', showExitConfirmation);
+      if (clearTimer !== null) window.clearTimeout(clearTimer);
+    };
+  }, [clearOperationMessage, setOperationMessage, t]);
 
   const reconcileVaultState = useCallback(async () => {
     await flushSettingsWrites();

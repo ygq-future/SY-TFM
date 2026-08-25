@@ -28,6 +28,14 @@ describe('desktop startup and Rust target configuration', () => {
     );
   });
 
+  it('requires a second Android back press before allowing the app to exit', () => {
+    const entry = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8');
+    expect(entry).toContain('onBackButtonPress');
+    expect(entry).toContain('mobile-back-confirmation-needed');
+    expect(entry).toContain('shouldPreventMobileExit');
+    expect(entry).toContain('.destroy()');
+  });
+
   it('uses distinct binary and library artifact names', () => {
     const cargo = readFileSync(new URL('../src-tauri/Cargo.toml', import.meta.url), 'utf8');
     const main = readFileSync(new URL('../src-tauri/src/main.rs', import.meta.url), 'utf8');

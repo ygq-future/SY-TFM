@@ -619,6 +619,7 @@ mod impl_ {
                 username: "user".to_string(),
                 password: String::new(),
                 tags: String::new(),
+                favorite_folders: Vec::new(),
                 download_path: None,
                 https: true,
                 base_path: base_path.map(str::to_string),

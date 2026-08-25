@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { AdapterCapability } from '../types/enums/AdapterCapability';
 import type { ConnectionStatus } from '../types/enums/ConnectionStatus';
 import type { RemoteHost } from '../types/generated/RemoteHost';
+import type { FavoriteFolder } from '../types/generated/FavoriteFolder';
 import * as tauri from '../lib/tauri';
 import { formatAppError } from '../lib/errors';
 
@@ -27,6 +28,7 @@ interface ConnectionState {
   // 动作
   loadHosts: () => Promise<void>;
   refreshHosts: () => Promise<void>;
+  addFavoriteFolders: (hostId: string, folders: FavoriteFolder[]) => Promise<void>;
   selectHost: (id: string | null) => void;
   connectHost: (id: string, password?: string) => Promise<void>;
   disconnectHost: (id: string) => Promise<void>;
@@ -65,6 +67,21 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
       );
     } catch (e) {
       set({ error: formatAppError(e) });
+    }
+  },
+
+  addFavoriteFolders: async (hostId, folders) => {
+    try {
+      const favoriteFolders = await tauri.addFavoriteFolders(hostId, folders);
+      set((state) => ({
+        hosts: state.hosts.map((host) =>
+          host.id === hostId ? { ...host, favoriteFolders } : host,
+        ),
+        error: null,
+      }));
+    } catch (e) {
+      set({ error: formatAppError(e) });
+      throw e;
     }
   },
 

@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
@@ -25,9 +26,9 @@ use crate::enums::{AdapterCapability, ConnectionStatus, Protocol, SortColumn};
 use crate::error::AppError;
 use crate::local_fs::{reject_existing_local_link, safe_local_child};
 use crate::models::{
-    AppSettings, BatchProgressPayload, ConnectionStatusPayload, DownloadRequest, HostDto,
-    ProgressPayload, RemoteEditSessionInfo, RemoteFile, RemoteHost, VaultSyncStatus,
-    VaultWebDavCredentials,
+    AppSettings, BatchProgressPayload, ConnectionStatusPayload, DownloadRequest, FavoriteFolder,
+    HostDto, ProgressPayload, RemoteEditSessionInfo, RemoteFile, RemoteHost, RemoteTextSnapshot,
+    VaultSyncStatus, VaultWebDavCredentials,
 };
 use crate::storage::SettingsService;
 use crate::transport::ProgressEvent;
@@ -120,6 +121,22 @@ pub struct TransferEntryRequest {
     /// 是否为目录。
     pub is_directory: bool,
     /// 前端创建的传输操作 ID。
+    pub operation_id: String,
+}
+
+/// 在线编辑保存的乐观并发请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadRemoteTextRequest {
+    /// 主机 ID。
+    pub host_id: String,
+    /// 远程文件路径。
+    pub remote_path: String,
+    /// 要保存的 UTF-8 文本。
+    pub content: String,
+    /// 读取编辑器内容时的远程版本指纹。
+    pub expected_revision: String,
+    /// 前端生成的可取消操作 ID。
     pub operation_id: String,
 }
 
@@ -655,6 +672,41 @@ pub async fn disconnect_host(
     Ok(())
 }
 
+/// 下载远程文件的原始字节，供在线编辑器读取和版本校验复用。
+async fn download_remote_text_bytes(
+    session_manager: &SessionManager,
+    host_id: Uuid,
+    remote_path: &str,
+) -> Result<Vec<u8>, AppError> {
+    let temporary_path = std::env::temp_dir().join(format!("sy-tfm-online-{}", Uuid::new_v4()));
+    let temporary_path_text = temporary_path.to_string_lossy().into_owned();
+    let (progress, mut receiver) = tokio::sync::mpsc::channel(16);
+    tauri::async_runtime::spawn(async move { while receiver.recv().await.is_some() {} });
+    let result = async {
+        session_manager
+            .download_file(host_id, remote_path, &temporary_path_text, progress)
+            .await?;
+        let metadata = tokio::fs::metadata(&temporary_path).await?;
+        if metadata.len() > EditPolicy::MaxOnlineFileBytes.value() {
+            return Err(AppError::unsupported(format!(
+                "Online editing supports files up to {} MiB",
+                EditPolicy::MaxOnlineFileBytes.value() / 1024 / 1024,
+            )));
+        }
+        Ok(tokio::fs::read(&temporary_path).await?)
+    }
+    .await;
+    let _ = tokio::fs::remove_file(&temporary_path).await;
+    result
+}
+
+fn remote_text_snapshot(bytes: Vec<u8>) -> Result<RemoteTextSnapshot, AppError> {
+    let content = decode_online_edit_text(bytes.clone())?;
+    let digest = Sha256::digest(&bytes);
+    let revision = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    Ok(RemoteTextSnapshot { content, revision })
+}
+
 /// 将远程文本文件读取到内存，供内置在线编辑器使用。
 fn decode_online_edit_text(bytes: Vec<u8>) -> Result<String, AppError> {
     let text = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
@@ -700,36 +752,78 @@ fn decode_online_edit_text(bytes: Vec<u8>) -> Result<String, AppError> {
     Ok(text)
 }
 
-/// 将远程文本文件读取到内存，供内置在线编辑器使用。
+/// 将远程文本文件读取到内存，并返回内容版本指纹。
+#[tauri::command]
+pub async fn read_remote_text_snapshot(
+    host_id: String,
+    remote_path: String,
+    session_manager: tauri::State<'_, SessionManager>,
+) -> Result<RemoteTextSnapshot, AppError> {
+    let uuid = parse_uuid(&host_id)?;
+    let bytes = download_remote_text_bytes(session_manager.inner(), uuid, &remote_path).await?;
+    remote_text_snapshot(bytes)
+}
+
+/// 将远程文本文件读取到内存，兼容旧的只返回内容的调用方。
 #[tauri::command]
 pub async fn read_remote_text(
     host_id: String,
     remote_path: String,
     session_manager: tauri::State<'_, SessionManager>,
 ) -> Result<String, AppError> {
-    let uuid = parse_uuid(&host_id)?;
-    let temporary_path = std::env::temp_dir().join(format!("sy-tfm-online-{}", Uuid::new_v4()));
-    let temporary_path_text = temporary_path.to_string_lossy().into_owned();
-    let (progress, mut receiver) = tokio::sync::mpsc::channel(16);
-    tauri::async_runtime::spawn(async move { while receiver.recv().await.is_some() {} });
-    session_manager
-        .download_file(uuid, &remote_path, &temporary_path_text, progress)
-        .await?;
+    Ok(
+        read_remote_text_snapshot(host_id, remote_path, session_manager)
+            .await?
+            .content,
+    )
+}
 
-    let result = async {
-        let metadata = tokio::fs::metadata(&temporary_path).await?;
-        if metadata.len() > EditPolicy::MaxOnlineFileBytes.value() {
-            return Err(AppError::unsupported(format!(
-                "Online editing supports files up to {} MiB",
-                EditPolicy::MaxOnlineFileBytes.value() / 1024 / 1024,
-            )));
-        }
-        let bytes = tokio::fs::read(&temporary_path).await?;
-        decode_online_edit_text(bytes)
+/// 仅在远程文件仍保持预期版本时保存在线编辑内容。
+#[tauri::command]
+pub async fn upload_remote_text_if_unchanged(
+    request: UploadRemoteTextRequest,
+    app: AppHandle,
+    session_manager: tauri::State<'_, SessionManager>,
+    transfer_manager: tauri::State<'_, TransferManager>,
+) -> Result<RemoteTextSnapshot, AppError> {
+    let uuid = parse_uuid(&request.host_id)?;
+    let current = remote_text_snapshot(
+        download_remote_text_bytes(session_manager.inner(), uuid, &request.remote_path).await?,
+    )?;
+    if current.revision != request.expected_revision {
+        return Err(AppError::new(
+            crate::enums::ErrorCode::SyncConflict,
+            "The remote file changed while it was open",
+        )
+        .with_details(serde_json::to_value(&current)?));
     }
+
+    let cancellation = transfer_manager.cancellation(&request.operation_id).await?;
+    let (progress, receiver) = tokio::sync::mpsc::channel(32);
+    let (heartbeat_tx, heartbeat_rx) = tokio::sync::mpsc::unbounded_channel();
+    let forwarder = tokio::spawn(forward_progress(
+        app,
+        uuid,
+        request.operation_id,
+        receiver,
+        AppEvent::UploadProgress.as_str(),
+        AppEvent::UploadDone.as_str(),
+        heartbeat_tx,
+    ));
+    let result = run_controlled_transfer(
+        session_manager.upload_content(
+            uuid,
+            &request.remote_path,
+            request.content.as_bytes().to_vec(),
+            progress,
+        ),
+        cancellation,
+        heartbeat_rx,
+    )
     .await;
-    let _ = tokio::fs::remove_file(&temporary_path).await;
-    result
+    let _ = forwarder.await;
+    result?;
+    remote_text_snapshot(request.content.into_bytes())
 }
 
 #[cfg(test)]
@@ -1574,6 +1668,77 @@ pub fn get_hosts() -> Result<Vec<RemoteHost>, AppError> {
     Ok(SettingsService::load()?.hosts)
 }
 
+fn has_new_favorite_folders(host: &RemoteHost, additions: &[FavoriteFolder]) -> bool {
+    additions.iter().any(|folder| {
+        !host
+            .favorite_folders
+            .iter()
+            .any(|existing| existing.path == folder.path)
+    })
+}
+
+fn append_unique_favorite_folders(
+    host: &mut RemoteHost,
+    additions: impl IntoIterator<Item = FavoriteFolder>,
+) {
+    for folder in additions {
+        if !host
+            .favorite_folders
+            .iter()
+            .any(|existing| existing.path == folder.path)
+        {
+            host.favorite_folders.push(folder);
+        }
+    }
+}
+
+/// 将一个或多个远程文件夹加入指定主机的收藏列表。
+///
+/// 该命令保持幂等：同一主机中已经存在的远程路径不会重复保存，也不会产生额外的同步变更。
+#[tauri::command]
+pub fn add_favorite_folders(
+    app: AppHandle,
+    host_id: String,
+    folders: Vec<FavoriteFolder>,
+) -> Result<Vec<FavoriteFolder>, AppError> {
+    let uuid = parse_uuid(&host_id)?;
+    let additions = folders
+        .into_iter()
+        .map(|folder| {
+            let name = folder.name.trim();
+            let path = folder.path.trim();
+            if name.is_empty() || path.is_empty() || name == ".." {
+                return Err(AppError::new(
+                    crate::enums::ErrorCode::StorageWriteFailed,
+                    "Favorite folder name and path must be non-empty",
+                ));
+            }
+            Ok(FavoriteFolder {
+                name: name.to_string(),
+                path: path.to_string(),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut settings = SettingsService::load()?;
+    let host_index = settings
+        .hosts
+        .iter()
+        .position(|host| host.id == uuid)
+        .ok_or_else(|| AppError::session_not_found(&host_id))?;
+    if !has_new_favorite_folders(&settings.hosts[host_index], &additions) {
+        return Ok(settings.hosts[host_index].favorite_folders.clone());
+    }
+
+    crate::core::vault_sync::capture_host_sync_baseline(&mut settings)?;
+    append_unique_favorite_folders(&mut settings.hosts[host_index], additions);
+    crate::core::vault_sync::mark_host_sync_pending(&mut settings);
+    let favorites = settings.hosts[host_index].favorite_folders.clone();
+    SettingsService::save(&settings)?;
+    crate::core::vault_sync::schedule_auto_sync(app);
+    Ok(favorites)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PasswordUpdate {
     Preserve,
@@ -1846,6 +2011,7 @@ mod password_update_tests {
             username: "alice".to_string(),
             password: "enc.v1:protected".to_string(),
             tags: String::new(),
+            favorite_folders: Vec::new(),
             download_path: None,
             https: true,
             base_path: None,
@@ -1858,6 +2024,56 @@ mod password_update_tests {
         changed.name = "changed".to_string();
         assert!(!host_unchanged(Some(&existing), &changed));
         assert!(!host_unchanged(None, &existing));
+    }
+
+    #[test]
+    fn favorite_folder_addition_is_idempotent_and_preserves_order() {
+        let mut host = RemoteHost {
+            id: Uuid::from_u128(43),
+            name: "favorites".to_string(),
+            protocol: crate::enums::Protocol::Sftp,
+            host: "example.com".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            password: String::new(),
+            tags: String::new(),
+            favorite_folders: vec![FavoriteFolder {
+                name: "existing".to_string(),
+                path: "/existing".to_string(),
+            }],
+            download_path: None,
+            https: true,
+            base_path: None,
+            sftp_host_key_fingerprint: None,
+            is_connected: false,
+        };
+        let additions = vec![
+            FavoriteFolder {
+                name: "new".to_string(),
+                path: "/new".to_string(),
+            },
+            FavoriteFolder {
+                name: "duplicate".to_string(),
+                path: "/existing".to_string(),
+            },
+        ];
+
+        assert!(has_new_favorite_folders(&host, &additions));
+        append_unique_favorite_folders(&mut host, additions);
+        assert_eq!(
+            host.favorite_folders
+                .iter()
+                .map(|folder| folder.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["/existing", "/new"]
+        );
+        assert!(!has_new_favorite_folders(
+            &host,
+            &[FavoriteFolder {
+                name: "another label".to_string(),
+                path: "/new".to_string(),
+            }]
+        ));
     }
 
     #[test]
@@ -1881,6 +2097,7 @@ mod password_update_tests {
                 username: "user".to_string(),
                 password: password.to_string(),
                 tags: String::new(),
+                favorite_folders: Vec::new(),
                 download_path: None,
                 https: true,
                 base_path: None,
@@ -1946,6 +2163,7 @@ pub fn import_hosts(app: AppHandle, hosts: Vec<HostDto>) -> Result<(), AppError>
             username: dto.username,
             password: String::new(), // 导入不含密码
             tags: dto.tags,
+            favorite_folders: dto.favorite_folders,
             download_path: dto.download_path,
             https: dto.https,
             base_path: dto.base_path,

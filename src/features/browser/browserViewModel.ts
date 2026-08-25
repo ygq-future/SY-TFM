@@ -156,6 +156,7 @@ export function getContextMenuPosition(
 export type FileContextAction =
   | 'download'
   | 'downloadTo'
+  | 'favorite'
   | 'remoteEdit'
   | 'onlineEdit'
   | 'rename'
@@ -167,14 +168,78 @@ export type FileContextAction =
 /** 根据命中目标生成稳定的菜单结构。 */
 export function getFileContextActions(
   file: RemoteFile | null,
-  selectionCount = 1,
+  selectedFiles: RemoteFile[] = [],
+  currentPath?: string,
 ): FileContextAction[] {
-  if (!file || file.name === '..') return ['refresh', 'mkdir', 'createFile'];
+  if (file?.name === '..') {
+    return ['refresh', 'mkdir', 'createFile'];
+  }
+
+  if (!file) {
+    return [
+      ...(canAddFavoriteFolder(file, selectedFiles, currentPath)
+        ? (['favorite'] as FileContextAction[])
+        : []),
+      'refresh',
+      'mkdir',
+      'createFile',
+    ];
+  }
 
   const common: FileContextAction[] = ['download', 'downloadTo'];
   if (!file.isDirectory) common.push('remoteEdit', 'onlineEdit');
+  const selectionCount = selectedFiles.length > 0 ? selectedFiles.length : 1;
   const singleSelectionActions: FileContextAction[] = selectionCount === 1 ? ['rename'] : [];
-  return [...common, ...singleSelectionActions, 'delete', 'refresh', 'mkdir', 'createFile'];
+  const favoriteAction: FileContextAction[] = canAddFavoriteFolder(file, selectedFiles)
+    ? ['favorite']
+    : [];
+  return [
+    ...common,
+    ...singleSelectionActions,
+    ...favoriteAction,
+    'delete',
+    'refresh',
+    'mkdir',
+    'createFile',
+  ];
+}
+
+/** 返回右键菜单当前应作用的收藏文件夹集合。 */
+export function getFavoriteFolderTargets(
+  file: RemoteFile | null,
+  selectedFiles: RemoteFile[] = [],
+  currentPath?: string,
+): RemoteFile[] {
+  if (!file && currentPath) return [getCurrentDirectoryFavoriteTarget(currentPath)];
+  return selectedFiles.length > 0 ? selectedFiles : file ? [file] : [];
+}
+
+/** 将当前浏览路径包装成可加入收藏列表的目录项。 */
+export function getCurrentDirectoryFavoriteTarget(currentPath: string): RemoteFile {
+  const fullPath = normalizeRemotePath(currentPath);
+  const segments = fullPath.split(/[\\/]/).filter(Boolean);
+  const name = segments.at(-1) ?? fullPath;
+  return {
+    name: name || '/',
+    fullPath,
+    size: 0,
+    isDirectory: true,
+    lastModified: '',
+    owner: null,
+    permissions: null,
+  };
+}
+
+/** 只有一个或多个真实文件夹的纯目录选择才允许加入收藏。 */
+export function canAddFavoriteFolder(
+  file: RemoteFile | null,
+  selectedFiles: RemoteFile[] = [],
+  currentPath?: string,
+): boolean {
+  const targets = getFavoriteFolderTargets(file, selectedFiles, currentPath);
+  return (
+    targets.length > 0 && targets.every((target) => target.isDirectory && target.name !== '..')
+  );
 }
 
 /** 面包屑路径节点。 */

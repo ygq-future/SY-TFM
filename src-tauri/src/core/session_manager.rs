@@ -572,6 +572,7 @@ mod password_resolution_tests {
             username: "tester".to_string(),
             password: password.to_string(),
             tags: String::new(),
+            favorite_folders: Vec::new(),
             download_path: None,
             https: true,
             base_path: None,

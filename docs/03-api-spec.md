@@ -671,7 +671,48 @@ invoke('read_remote_text', {
 
 ---
 
-### 6.3 upload_content
+### 6.3 read_remote_text_snapshot
+
+读取在线编辑器所需的文本和远程文件内容指纹。编辑器会周期性调用该接口，发现指纹变化后提示并同步内容，避免继续使用旧版本覆盖远程文件。
+
+```typescript
+invoke('read_remote_text_snapshot', {
+  hostId: string,
+  remotePath: string,
+})
+```
+
+**返回值：**
+```typescript
+{
+  content: string;
+  revision: string; // 远程文件原始字节的 SHA-256
+}
+```
+
+---
+
+### 6.4 upload_remote_text_if_unchanged
+
+保存在线编辑内容时校验远程版本。`expectedRevision` 与当前远程版本不一致时返回 `sync_conflict` 及最新 `RemoteTextSnapshot`，不会上传内容。
+
+```typescript
+invoke('upload_remote_text_if_unchanged', {
+  request: {
+    hostId: string,
+    remotePath: string,
+    content: string,
+    expectedRevision: string,
+    operationId: string,
+  },
+})
+```
+
+**返回值：** `RemoteTextSnapshot`
+
+---
+
+### 6.5 upload_content
 
 保存内置编辑器内容到远程。
 
@@ -688,7 +729,7 @@ invoke('upload_content', {
 
 ---
 
-### 6.4 list_remote_edit_sessions
+### 6.6 list_remote_edit_sessions
 
 列出指定连接中仍有效且临时文件仍存在的外部编辑监听。
 
@@ -700,7 +741,7 @@ invoke('list_remote_edit_sessions', { hostId: string })
 
 ---
 
-### 6.5 stop_remote_edit
+### 6.7 stop_remote_edit
 
 停止所有编辑会话（断开连接时调用）。
 
@@ -898,7 +939,23 @@ invoke('save_host', {
 
 ---
 
-### 8.3 reorder_hosts
+### 8.3 add_favorite_folders
+
+将一个或多个远程文件夹加入指定主机的收藏列表。同一主机中按完整远程路径去重，重复加入不会产生同步变更。
+
+```typescript
+invoke('add_favorite_folders', {
+  hostId: string,
+  folders: Array<{
+    name: string;
+    path: string;
+  }>,
+})
+```
+
+**返回值：** `FavoriteFolder[]`（加入后的该主机完整收藏列表）
+
+### 8.4 reorder_hosts
 
 按给定 ID 顺序原子持久化全部主机。数组必须包含当前保存的每个主机且恰好一次；命令只改变顺序，
 不会接受或重写主机密码等配置字段。
@@ -913,7 +970,7 @@ invoke('reorder_hosts', {
 
 ---
 
-### 8.4 delete_host
+### 8.5 delete_host
 
 删除主机。
 
@@ -927,7 +984,7 @@ invoke('delete_host', {
 
 ---
 
-### 8.5 clone_host
+### 8.6 clone_host
 
 克隆主机配置。
 
@@ -942,7 +999,7 @@ invoke('clone_host', {
 
 ---
 
-### 8.6 get_supported_protocols
+### 8.7 get_supported_protocols
 
 获取当前应用支持的协议列表（用于主机编辑界面动态渲染协议选项）。
 

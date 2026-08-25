@@ -63,6 +63,7 @@ export function HostEditDialog({
           username: 'anonymous',
           password: '',
           tags: '',
+          favoriteFolders: [],
           downloadPath: null,
           https: true,
           basePath: null,

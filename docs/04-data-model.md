@@ -265,7 +265,20 @@ bitflags! {
 
 ## 3. 核心数据模型
 
-### 3.1 RemoteHost（主机配置）
+### 3.1 FavoriteFolder（收藏文件夹）
+
+收藏文件夹属于单个主机，用于从路径栏或移动端收藏入口直接导航到远程目录。收藏列表按首次加入顺序保存，同一远程路径最多出现一次。
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct FavoriteFolder {
+    pub name: String,
+    pub path: String,
+}
+```
+
+### 3.2 RemoteHost（主机配置）
 
 替代旧版的 FtpHost，支持多种协议。
 
@@ -304,6 +317,9 @@ pub struct RemoteHost {
     /// 标签（逗号分隔字符串，如 "prod,web,server1"）
     #[serde(default)]
     pub tags: String,
+    /// 该主机独立维护的收藏文件夹列表
+    #[serde(default)]
+    pub favorite_folders: Vec<FavoriteFolder>,
     /// 每主机下载路径覆盖（null = 使用全局默认）
     #[serde(default)]
     pub download_path: Option<String>,
@@ -346,6 +362,7 @@ impl RemoteHost {
             username: self.username.clone(),
             password: self.password.clone(),
             tags: self.tags.clone(),
+            favorite_folders: Vec::new(),
             download_path: self.download_path.clone(),
             https: self.https,
             base_path: self.base_path.clone(),
@@ -397,6 +414,7 @@ export interface RemoteHost {
   "username": "deploy",
   "password": "enc.v1:SGVsbG8gV29ybGQ...",
   "tags": "prod,web",
+  "favoriteFolders": [{ "name": "deploy", "path": "/srv/deploy" }],
   "downloadPath": null,
   "https": true,
   "basePath": null
@@ -421,7 +439,7 @@ export interface RemoteHost {
 
 ---
 
-### 3.2 RemoteFile（远程文件）
+### 3.3 RemoteFile（远程文件）
 
 **Rust 定义：**
 
@@ -487,7 +505,7 @@ export interface RemoteFile {
 
 ---
 
-### 3.3 AppSettings（应用配置）
+### 3.4 AppSettings（应用配置）
 
 **Rust 定义：**
 
@@ -617,7 +635,7 @@ impl Default for AppSettings {
 
 ---
 
-### 3.4 HostDto（主机传输对象）
+### 3.5 HostDto（主机传输对象）
 
 用于配置导入/导出，绕过机器特定加密。
 
@@ -639,6 +657,8 @@ pub struct HostDto {
     #[serde(skip_serializing)]
     pub password: Option<String>,
     pub tags: String,
+    #[serde(default)]
+    pub favorite_folders: Vec<FavoriteFolder>,
     pub download_path: Option<String>,
     pub https: bool,
     pub base_path: Option<String>,
@@ -654,6 +674,7 @@ impl From<RemoteHost> for HostDto {
             username: h.username,
             password: if h.password.is_empty() { None } else { Some("[PROTECTED]".to_string()) },
             tags: h.tags,
+            favorite_folders: h.favorite_folders,
             download_path: h.download_path,
             https: h.https,
             base_path: h.base_path,
@@ -869,6 +890,8 @@ enc.v1:<Base64(nonce || ciphertext || tag)>
 同步时当前平台只替换自己的 `platforms` 条目并更新共享 `hosts`，其他平台条目原样保留。每主机 `downloadPath` 也保存在当前平台的 `hostSettings`，不会进入共享主机。平台背景的本地绝对路径不写入云端，只保存资源索引；实际字节位于同一 `/SY-TFM` 目录下的 `background-windows-<sha256>.gz`、`background-android-<sha256>.gz` 等内容寻址平台文件。新资源先上传，配置提交成功后才清理旧资源，因此正常状态每个平台只有一个压缩包，失败重试期间可能暂时保留新旧两个。恢复时先验证解压上限、原始大小和 SHA-256，再写入当前设备 `backgrounds` 目录。不存在当前平台条目则采用当前平台默认设置，只恢复主机连接数据。旧 schema v1 没有平台标识，迁移时仅保留可证明共享的主机；schema v2 的 `{ fileName, dataBase64 }` 会在下一次同步迁移为独立资源。
 `VaultSyncSettings.backupPassword` 是便携导出与 WebDAV 共用的备份密码，只以当前设备 `enc.v1` 密文保存在 `settings.json`，不会进入便携载荷。`lastSyncedHostsHash` 与 `lastSyncedPlatformHash` 分别缓存共享主机和当前平台条目的 SHA-256 指纹；`lastSyncedScopeHash` 保留组合指纹，供旧配置迁移和完整作用域校验。`lastSyncedHostsSnapshot` 保存由当前设备主密钥再次加密的上次共享主机快照，仅用于逐 UUID 三方合并，不得以明文落盘或上传云端。这些检查点不包含其他平台条目；`enabled=false` 表示暂停而非解绑，其余同步字段必须原样保留。
 
+收藏夹随共享 `hosts` 一起同步，因此 Windows 和 Android 看到同一主机的同一份收藏列表；旧配置缺少 `favoriteFolders` 字段时按空列表处理。
+
 同步先下载并解密云端文档。共享主机按稳定 UUID 与加密的上次快照执行三方合并：不同 UUID 的两端新增取并集；某端未修改的记录接受另一端更新或删除；删除与同一记录的并发编辑以删除优先，防止离线设备复活已删除主机；同一 UUID 的不兼容并发新增/编辑仍返回明确冲突。主机顺序在只有一端变化时采用变化端，两端都变化时以云端现有顺序为基准追加本地独有项。当前平台条目继续按独立指纹三方判断，因此两个不同作用域可在同一轮中双向合并。内容相同则不上传、不增加 revision。旧设备在第一次主机写入前若哈希仍匹配，会先生成加密快照；无法确认基线时采用保守冲突策略。
 
 ---
@@ -943,6 +966,18 @@ enc.v1:<Base64(nonce || ciphertext || tag)>
         "username": { "type": "string", "default": "anonymous" },
         "password": { "type": "string", "default": "" },
         "tags": { "type": "string", "default": "" },
+        "favoriteFolders": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "path"],
+            "properties": {
+              "name": { "type": "string" },
+              "path": { "type": "string" }
+            }
+          },
+          "default": []
+        },
         "downloadPath": { "type": ["string", "null"] },
         "https": { "type": "boolean", "default": true },
         "basePath": { "type": ["string", "null"] }

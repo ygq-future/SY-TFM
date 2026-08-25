@@ -240,6 +240,26 @@ describe('app shell interaction wiring', () => {
     );
   });
 
+  it('keeps host favorites ahead of Home on desktop and exposes Home on Android', () => {
+    const favoriteMenu = readFileSync(
+      new URL('./features/browser/FavoriteFoldersMenu.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(source).toMatch(
+      /<div className="path-actions">[\s\S]*?<FavoriteFoldersMenu[\s\S]*?<button[\s\S]*?title=\{t\('browser\.home'\)\}/,
+    );
+    expect(source).toMatch(
+      /className="mobile-file-actions"[\s\S]*?<FavoriteFoldersMenu[\s\S]*?mobile[\s\S]*?mobile-home-action[\s\S]*?browser\.home[\s\S]*?mobile-refresh-action/,
+    );
+    expect(source).toContain('onAddFavorite={(files) => void handleAddFavorite(files)}');
+    expect(favoriteMenu).toContain('favoriteFolders');
+    expect(favoriteMenu).toContain('canAddFavoriteFolder(null, selectedFiles)');
+    expect(favoriteMenu).toContain('folder.path');
+    expect(css).toContain('.favorite-folders-menu');
+    expect(source).toContain('if (file === null) selectFiles(paneIndex, [])');
+    expect(source).toContain('currentPath={pane.currentPath}');
+  });
+
   it('keeps Android connection and item counts on the same status row', () => {
     expect(css).toMatch(
       /html\.mobile-platform[\s\S]*?\.global-status-bar\s*\{[^}]*grid-template-areas:\s*'connection meta'/s,
@@ -250,6 +270,22 @@ describe('app shell interaction wiring', () => {
     expect(css).toMatch(
       /html\.mobile-platform[\s\S]*?\.global-status-bar:has\(\.transfer-status--visible\)\s*\{[^}]*flex:\s*0\s+0\s+auto;[^}]*overflow:\s*hidden/s,
     );
+  });
+
+  it('keeps desktop Vault status readable and starts transfer tasks from the left side of the center cell', () => {
+    expect(css).toContain(
+      'grid-template-columns: minmax(220px, 1fr) minmax(270px, 1.1fr) minmax(300px, 1.4fr);',
+    );
+    expect(css).toMatch(/\.transfer-status\s*\{[^}]*justify-content:\s*flex-start/s);
+    expect(css).toMatch(
+      /\.vault-status-meta > span:first-of-type\s*\{[^}]*overflow:\s*visible[^}]*text-overflow:\s*clip/s,
+    );
+    expect(css).toMatch(/\.transfer-task\s*\{[^}]*max-width:\s*100%[^}]*flex:\s*1\s+1\s+auto/s);
+    expect(css).toMatch(
+      /\.transfer-task-message\s*\{[^}]*min-width:\s*0[^}]*flex:\s*1\s+1\s+auto[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis/s,
+    );
+    expect(css).toMatch(/\.status-progress-track\s*\{[^}]*flex:\s*0\s+0\s+auto/s);
+    expect(css).toMatch(/\.transfer-status strong\s*\{[^}]*flex:\s*0\s+0\s+auto/s);
   });
 
   it('shows pane-aware Android drop feedback and keeps cross-host wording as copy', () => {

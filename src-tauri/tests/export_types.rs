@@ -26,6 +26,7 @@ fn export_all_types() {
     Platform::export_all().unwrap();
     TransferDirection::export_all().unwrap();
     AdapterCapability::export_all().unwrap();
+    AppWindow::export_all().unwrap();
     HttpScheme::export_all().unwrap();
     VaultSyncPhase::export_all().unwrap();
 
@@ -43,6 +44,7 @@ fn export_all_types() {
     EditorSyncedPayload::export_all().unwrap();
     EditorErrorPayload::export_all().unwrap();
     EditorSessionInvalidPayload::export_all().unwrap();
+    RemoteTextSnapshot::export_all().unwrap();
     VaultKdfParameters::export_all().unwrap();
     VaultKeyEnvelope::export_all().unwrap();
     VaultSyncSettings::export_all().unwrap();

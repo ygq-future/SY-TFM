@@ -6,6 +6,7 @@ import { useConnectionStore } from './connectionStore';
 vi.mock('../lib/tauri', () => ({
   getHosts: vi.fn(),
   reorderHosts: vi.fn(),
+  addFavoriteFolders: vi.fn(),
 }));
 
 function host(id: string, password: string): RemoteHost {
@@ -18,6 +19,7 @@ function host(id: string, password: string): RemoteHost {
     username: 'user',
     password,
     tags: '',
+    favoriteFolders: [],
     downloadPath: null,
     https: true,
     basePath: null,
@@ -58,5 +60,20 @@ describe('connection store host ordering', () => {
 
     expect(useConnectionStore.getState().hosts).toBe(hosts);
     expect(useConnectionStore.getState().isLoading).toBe(false);
+  });
+
+  it('updates only the target host after adding favorite folders', async () => {
+    const hosts = [host('a', 'secret-a'), host('b', 'secret-b')];
+    useConnectionStore.setState({ hosts });
+    const favoriteFolders = [{ name: 'docs', path: '/docs' }];
+    (tauri.addFavoriteFolders as MockedFunction<typeof tauri.addFavoriteFolders>).mockResolvedValue(
+      favoriteFolders,
+    );
+
+    await useConnectionStore.getState().addFavoriteFolders('b', favoriteFolders);
+
+    expect(useConnectionStore.getState().hosts[0]?.favoriteFolders).toEqual([]);
+    expect(useConnectionStore.getState().hosts[1]?.favoriteFolders).toEqual(favoriteFolders);
+    expect(tauri.addFavoriteFolders).toHaveBeenCalledWith('b', favoriteFolders);
   });
 });

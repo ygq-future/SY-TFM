@@ -37,9 +37,10 @@ describe('remote editor integration', () => {
 
   it('keeps online edit sync as a quiet left-side status instead of a transfer card', () => {
     const app = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
-    const saveStart = app.indexOf('onSave={async (content)');
+    const saveStart = app.indexOf('onSave={async (content, expectedRevision)');
     const saveFlow = app.slice(saveStart, app.indexOf('\n          />', saveStart));
     expect(saveFlow).toContain("setEditorOperationMessage(\n                    t('editor.synced'");
+    expect(saveFlow).toContain('uploadRemoteTextIfUnchanged');
     expect(saveFlow).not.toContain('startTransfer({');
     expect(saveFlow).not.toContain('updateTransfer(');
   });
@@ -76,10 +77,10 @@ describe('remote editor integration', () => {
     const remoteStart = appSource.indexOf('const handleRemoteEdit');
     const onlineFlow = appSource.slice(onlineStart, remoteStart);
     const remoteFlow = appSource.slice(remoteStart, appSource.indexOf('const handleDelete'));
-    expect(onlineFlow).toContain('readRemoteText(hostId, file.fullPath)');
+    expect(onlineFlow).toContain('readRemoteTextSnapshot(hostId, file.fullPath)');
     expect(onlineFlow).not.toContain('isEditableTextFile(file.name)');
     expect(remoteFlow).toContain('isEditableTextFile(file.name)');
-    expect(commands).toContain('decode_online_edit_text(bytes)');
+    expect(commands).toContain('remote_text_snapshot(bytes)');
     expect(commands).toContain("text.contains('\\0')");
   });
 
@@ -190,5 +191,60 @@ describe('remote editor integration', () => {
     expect(zh).toContain('"stopSessionFailed"');
     expect(en).toContain('"stopSession"');
     expect(en).toContain('"stopSessionFailed"');
+  });
+
+  it('opens desktop online edit in a unique independent window', () => {
+    const launcher = readFileSync(new URL('./editorWindowLauncher.ts', import.meta.url), 'utf8');
+    const main = readFileSync(new URL('../../main.tsx', import.meta.url), 'utf8');
+    const app = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
+    const capability = readFileSync(
+      new URL('../../../src-tauri/capabilities/default.json', import.meta.url),
+      'utf8',
+    );
+    const launcherCapability = readFileSync(
+      new URL('../../../src-tauri/capabilities/editor-launcher.json', import.meta.url),
+      'utf8',
+    );
+    expect(launcher).toContain('new WebviewWindow(label');
+    expect(launcher).toContain('crypto.randomUUID()');
+    expect(launcher).toContain('new URLSearchParams');
+    expect(launcher).toContain('visible: true');
+    expect(launcher).toContain('decorations: false');
+    expect(launcher).toContain('transparent: true');
+    expect(main).toContain('<EditorWindow />');
+    expect(main).toContain('isEditorWindow()');
+    expect(main).toContain('const settings = useSettingsStore.getState()');
+    expect(main).toContain('document.documentElement.dataset.theme = settings.theme');
+    expect(main).toContain('document.documentElement.dataset.accent = settings.accentColor');
+    const embeddedEditorStart = app.indexOf('<OnlineEditor');
+    const embeddedEditorEnd = app.indexOf('/>', embeddedEditorStart);
+    expect(app.slice(embeddedEditorStart, embeddedEditorEnd)).not.toContain('windowed');
+    const editorWindow = readFileSync(new URL('./EditorWindow.tsx', import.meta.url), 'utf8');
+    expect(editorWindow).toContain('app-shell editor-window-shell');
+    expect(editorWindow).toContain('data-theme={theme}');
+    expect(editorWindow).toContain('data-accent={accentColor}');
+    expect(editorWindow).toContain('loadBackgroundImage(backgroundImage)');
+    expect(capability).toContain('editor-*');
+    expect(launcherCapability).toContain('core:webview:allow-create-webview-window');
+    expect(launcherCapability).toContain('"main"');
+  });
+
+  it('uses a remote revision for polling and blocks stale saves', () => {
+    const editor = readFileSync(new URL('./OnlineEditor.tsx', import.meta.url), 'utf8');
+    const editorWindow = readFileSync(new URL('./EditorWindow.tsx', import.meta.url), 'utf8');
+    const sync = readFileSync(new URL('./editorSync.ts', import.meta.url), 'utf8');
+    const commands = readFileSync(
+      new URL('../../../src-tauri/src/commands/mod.rs', import.meta.url),
+      'utf8',
+    );
+    expect(editor).toContain('setInterval');
+    expect(editor).toContain('classifyRemoteChange');
+    expect(editor).toContain('isBlockedByConflict');
+    expect(editorWindow).toContain('uploadRemoteTextIfUnchanged');
+    expect(sync).toContain("return content === savedContent ? 'reload' : 'conflict'");
+    expect(commands).toContain('read_remote_text_snapshot');
+    expect(commands).toContain('upload_remote_text_if_unchanged');
+    expect(commands).toContain('expected_revision');
+    expect(commands).toContain('ErrorCode::SyncConflict');
   });
 });

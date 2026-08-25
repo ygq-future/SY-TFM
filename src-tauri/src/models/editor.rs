@@ -21,6 +21,17 @@ pub struct RemoteEditSessionInfo {
     pub remote_path: String,
 }
 
+/// 在线编辑器读取到的远程文本及其内容版本。
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "../../src/types/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteTextSnapshot {
+    /// UTF-8 文本内容。
+    pub content: String,
+    /// 远程文件原始字节的 SHA-256 指纹，用于保存前的乐观并发校验。
+    pub revision: String,
+}
+
 /// 外部编辑器文件同步成功事件。
 #[derive(Debug, Clone, Serialize, TS)]
 #[ts(export, export_to = "../../src/types/generated/")]
